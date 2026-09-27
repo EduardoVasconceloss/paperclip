@@ -119,7 +119,8 @@ it("rejects nonzero tar exit even after a valid listing", async () => {
 
 it("times out and reaps a stalled listing process", async () => {
   const checkReaped = await fakeTar(`setInterval(() => {}, 1_000);`);
-  await expect(assertTarballEntriesConfined("unused.tar", 200)).rejects.toThrow("timed out");
+  // Leave enough startup time for the PID witness under parallel test load.
+  await expect(assertTarballEntriesConfined("unused.tar", 2_000)).rejects.toThrow("timed out");
   await checkReaped();
 });
 
