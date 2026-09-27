@@ -9,7 +9,7 @@ const meta = {
     layout: "fullscreen",
     options: { showPanel: false },
     docs: { description: { component:
-      "Interactive design proposal for one composer picker with a searchable assignee above model and effort. The assignee determines the harness and catalog; changing assignees clears per-message overrides. Effort is selected only with a model-specific slider where levels are known, with the selected level centered above it. Custom IDs are accepted for harnesses that support them, while OpenRouter requires openrouter/provider/model. A fast-mode icon sits to the left of the effort label only for supported known Codex models, and the reset icon sits to the right. These stories use local fixture state; composer selections are not wired to task execution yet."
+      "Interactive design proposal for one composer picker with a searchable assignee above model and effort. The assignee determines the harness and catalog; changing assignees clears per-message overrides. Effort is selected only with a model-specific slider where levels are known; no effort section appears when capabilities are unknown. The picker animates its height as content changes and opens as a modal on mobile. Custom IDs are accepted for harnesses that support them, while OpenRouter requires openrouter/provider/model. A fast-mode icon sits to the left of the effort label only for supported known Codex models, and the reset icon sits to the right. These stories use local fixture state; composer selections are not wired to task execution yet."
     } },
   },
   args: { agentId: "codex", initialPanel: "closed" },
@@ -78,6 +78,12 @@ export const OpenRouterSearch: Story = {
 export const OpenRouterCustomId: Story = {
   name: "09 · OpenRouter · pasted custom ID",
   args: { agentId: "openrouter", initialModel: "openrouter/qwen/qwen3-coder-next", initialPanel: "settings" },
+  play: async ({ canvasElement }) => {
+    const screen = within(canvasElement.ownerDocument.body);
+    await expect(screen.queryByRole("slider")).toBeNull();
+    await expect(screen.queryByText(/Effort levels are not advertised/)).toBeNull();
+    await expect(screen.getByRole("button", { name: "Reset to agent default" })).toBeVisible();
+  },
 };
 export const OpenRouterManualEntry: Story = {
   name: "10 · OpenRouter · type exact model",
@@ -86,7 +92,8 @@ export const OpenRouterManualEntry: Story = {
     const screen = within(canvasElement.ownerDocument.body);
     await userEvent.click(screen.getByRole("button", { name: /Use exact ID/ }));
     await expect(screen.getByRole("button", { name: "Choose exact model" })).toHaveTextContent("openrouter/qwen/qwen3-coder-next");
-    await expect(screen.getByTestId("effort-unavailable")).toHaveTextContent("model default");
+    await expect(screen.queryByRole("slider")).toBeNull();
+    await expect(screen.queryByText(/Effort levels are not advertised/)).toBeNull();
   },
 };
 export const OpenRouterPasteProposal: Story = {
@@ -183,18 +190,40 @@ export const AgentSwitchClearsOverrides: Story = {
     const screen = within(canvasElement.ownerDocument.body);
     await userEvent.click(screen.getByRole("option", { name: /Nora/ }));
     await expect(screen.getByRole("button", { name: "Choose exact model" })).toHaveTextContent("Claude Sonnet 4.6");
-    await expect(screen.getByTestId("effort-unavailable")).toHaveTextContent("model default");
+    await expect(screen.queryByRole("slider")).toBeNull();
+    await expect(screen.queryByText(/Effort levels are not advertised/)).toBeNull();
     await expect(screen.queryByRole("button", { name: "Fast mode" })).toBeNull();
   },
 };
 export const Mobile: Story = {
-  name: "21 · Mobile · picker above composer",
+  name: "21 · Mobile · centered picker modal",
   args: { agentId: "codex", initialPanel: "settings", compact: true },
   globals: { viewport: { value: "mobile1", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const screen = within(canvasElement.ownerDocument.body);
+    await expect(screen.getByTestId("composer-mobile-dialog")).toBeVisible();
+    await expect(screen.getByRole("slider", { name: "Effort" })).toBeVisible();
+  },
 };
 export const MobileAssigneeSearch: Story = {
   name: "21b · Mobile assignee search",
   args: { agentId: "codex", initialPanel: "agents", initialAssigneeSearch: "Claude", compact: true },
+  globals: { viewport: { value: "mobile1", isRotated: false } },
+};
+export const MobileOpenRouterCustomId: Story = {
+  name: "21c · Mobile · custom model without effort",
+  args: { agentId: "openrouter", initialModel: "openrouter/qwen/qwen3-coder-next", initialPanel: "settings", compact: true },
+  globals: { viewport: { value: "mobile1", isRotated: false } },
+  play: async ({ canvasElement }) => {
+    const screen = within(canvasElement.ownerDocument.body);
+    await expect(screen.getByTestId("composer-mobile-dialog")).toBeVisible();
+    await expect(screen.queryByRole("slider")).toBeNull();
+    await expect(screen.queryByText(/Effort levels are not advertised/)).toBeNull();
+  },
+};
+export const MobileModelSearch: Story = {
+  name: "21d · Mobile · searchable model modal",
+  args: { agentId: "openrouter", initialPanel: "models", initialSearch: "deepseek", compact: true },
   globals: { viewport: { value: "mobile1", isRotated: false } },
 };
 export const Light: Story = {
