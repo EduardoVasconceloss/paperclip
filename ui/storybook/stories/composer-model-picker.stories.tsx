@@ -9,7 +9,7 @@ const meta = {
     layout: "fullscreen",
     options: { showPanel: false },
     docs: { description: { component:
-      "Interactive design proposal for one composer picker with the assignee above model and effort. The assignee determines the harness and catalog; changing assignees clears per-message overrides. Effort is selected only with a model-specific slider where levels are known. Custom IDs are accepted for harnesses that support them, while OpenRouter requires openrouter/provider/model. A fast-mode icon appears in the top right only for supported known Codex models. These stories use local fixture state; composer selections are not wired to task execution yet."
+      "Interactive design proposal for one composer picker with a searchable assignee above model and effort. The assignee determines the harness and catalog; changing assignees clears per-message overrides. Effort is selected only with a model-specific slider where levels are known, with the selected level centered above it. Custom IDs are accepted for harnesses that support them, while OpenRouter requires openrouter/provider/model. A fast-mode icon sits to the left of the effort label only for supported known Codex models, and the reset icon sits to the right. These stories use local fixture state; composer selections are not wired to task execution yet."
     } },
   },
   args: { agentId: "codex", initialPanel: "closed" },
@@ -150,8 +150,31 @@ export const HermesGatewayNoModel: Story = {
   args: { agentId: "hermes-gateway", initialPanel: "settings" },
 };
 export const AgentMenu: Story = {
-  name: "20 · Choose assignee in unified picker",
+  name: "20 · Searchable assignee list",
   args: { initialPanel: "agents" },
+};
+export const AssigneeSearch: Story = {
+  name: "20a · Search by assignee harness",
+  args: { initialPanel: "agents", initialAssigneeSearch: "OpenRouter" },
+  play: async ({ canvasElement }) => {
+    const screen = within(canvasElement.ownerDocument.body);
+    await expect(screen.getByRole("searchbox", { name: "Search assignees" })).toHaveValue("OpenRouter");
+    await expect(screen.getAllByRole("option")).toHaveLength(1);
+    await expect(screen.getByRole("option", { name: /Nora/ })).toBeVisible();
+  },
+};
+export const AssigneeSearchNoMatches: Story = {
+  name: "20aa · Assignee search has no matches",
+  args: { initialPanel: "agents", initialAssigneeSearch: "unknown teammate" },
+};
+export const AssigneeSearchKeyboard: Story = {
+  name: "20ab · Choose searched assignee with Enter",
+  args: { initialPanel: "agents", initialAssigneeSearch: "OpenRouter" },
+  play: async ({ canvasElement }) => {
+    const screen = within(canvasElement.ownerDocument.body);
+    await userEvent.type(screen.getByRole("searchbox", { name: "Search assignees" }), "{Enter}");
+    await expect(screen.getByRole("button", { name: "Choose exact model" })).toHaveTextContent("Claude Sonnet 4.6");
+  },
 };
 export const AgentSwitchClearsOverrides: Story = {
   name: "20b · Switching agents resets overrides",
@@ -167,6 +190,11 @@ export const AgentSwitchClearsOverrides: Story = {
 export const Mobile: Story = {
   name: "21 · Mobile · picker above composer",
   args: { agentId: "codex", initialPanel: "settings", compact: true },
+  globals: { viewport: { value: "mobile1", isRotated: false } },
+};
+export const MobileAssigneeSearch: Story = {
+  name: "21b · Mobile assignee search",
+  args: { agentId: "codex", initialPanel: "agents", initialAssigneeSearch: "Claude", compact: true },
   globals: { viewport: { value: "mobile1", isRotated: false } },
 };
 export const Light: Story = {
