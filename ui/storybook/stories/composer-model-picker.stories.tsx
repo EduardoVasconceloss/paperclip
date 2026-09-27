@@ -9,7 +9,7 @@ const meta = {
     layout: "fullscreen",
     options: { showPanel: false },
     docs: { description: { component:
-      "Interactive design proposal for choosing a model beside the agent in the task composer. The agent determines the harness and catalog; changing agents clears per-message overrides. Effort uses model-specific choices only where known. Custom IDs are accepted for harnesses that support them, while OpenRouter requires openrouter/provider/model. Fast mode appears only for supported known Codex models. These stories use local fixture state; composer selections are not wired to task execution yet."
+      "Interactive design proposal for one composer picker with the assignee above model and effort. The assignee determines the harness and catalog; changing assignees clears per-message overrides. Effort is selected only with a model-specific slider where levels are known. Custom IDs are accepted for harnesses that support them, while OpenRouter requires openrouter/provider/model. A fast-mode icon appears in the top right only for supported known Codex models. These stories use local fixture state; composer selections are not wired to task execution yet."
     } },
   },
   args: { agentId: "codex", initialPanel: "closed" },
@@ -20,28 +20,33 @@ export default meta;
 type Story = StoryObj<typeof meta>;
 
 export const DefaultComposer: Story = {
-  name: "01 · Agent and model side by side",
+  name: "01 · Unified assignee and model picker",
 };
 export const EffortSlider: Story = {
   name: "02 · Codex effort slider",
   args: { initialPanel: "settings", initialEffort: "high" },
 };
 export const ExactEffort: Story = {
-  name: "02b · Select an exact effort",
-  args: { initialPanel: "settings" },
-  play: async ({ canvasElement }) => {
-    const screen = within(canvasElement.ownerDocument.body);
-    await userEvent.click(screen.getAllByText("Extra High", { exact: true }).at(-1)!);
-    await expect(screen.getByTestId("selected-effort")).toHaveTextContent("Extra High");
-  },
+  name: "02b · Slider at Extra High",
+  args: { initialPanel: "settings", initialEffort: "xhigh" },
 };
 export const ExactModelList: Story = {
   name: "03 · Search exact Codex models",
   args: { initialPanel: "models" },
 };
 export const AstraFastMode: Story = {
-  name: "04 · Astra · six efforts and fast mode",
+  name: "04 · Astra · fast icon active",
   args: { initialModel: "gpt-6-astra", initialEffort: "ultra", initialFast: true, initialPanel: "settings" },
+};
+export const FastModeToggle: Story = {
+  name: "04b · Toggle fast icon",
+  args: { initialPanel: "settings" },
+  play: async ({ canvasElement }) => {
+    const screen = within(canvasElement.ownerDocument.body);
+    const toggle = screen.getByRole("button", { name: "Fast mode" });
+    await userEvent.click(toggle);
+    await expect(toggle).toHaveAttribute("aria-pressed", "true");
+  },
 };
 export const FastModeUnavailable: Story = {
   name: "05 · Model without fast mode",
@@ -52,14 +57,14 @@ export const CodexCustomUnknown: Story = {
   args: { initialModel: "my-private-codex-model", initialPanel: "settings" },
 };
 export const ResetToAgentDefault: Story = {
-  name: "06 · Reset model and effort",
+  name: "06 · Reset model, effort and fast mode",
   args: { initialModel: "gpt-6-astra", initialEffort: "ultra", initialFast: true, initialPanel: "settings" },
   play: async ({ canvasElement }) => {
     const screen = within(canvasElement.ownerDocument.body);
-    await userEvent.click(screen.getByRole("button", { name: "Reset model and effort to agent default" }));
+    await userEvent.click(screen.getByRole("button", { name: "Reset to agent default" }));
     await expect(screen.getByTestId("selected-effort")).toHaveTextContent("Default");
     await expect(screen.getByRole("button", { name: "Choose exact model" })).toHaveTextContent("GPT-5.6 Sol");
-    await expect(screen.getByRole("checkbox", { name: "Fast mode" })).not.toBeChecked();
+    await expect(screen.getByRole("button", { name: "Fast mode" })).toHaveAttribute("aria-pressed", "false");
   },
 };
 export const Claude: Story = {
@@ -130,22 +135,22 @@ export const HermesManual: Story = {
 };
 export const ProcessNoModel: Story = {
   name: "18 · Process · no model setting",
-  args: { agentId: "process" },
+  args: { agentId: "process", initialPanel: "settings" },
 };
 export const HttpNoModel: Story = {
   name: "18b · HTTP · remote model",
-  args: { agentId: "http" },
+  args: { agentId: "http", initialPanel: "settings" },
 };
 export const GatewayNoModel: Story = {
   name: "19 · OpenClaw · remote model",
-  args: { agentId: "openclaw" },
+  args: { agentId: "openclaw", initialPanel: "settings" },
 };
 export const HermesGatewayNoModel: Story = {
   name: "19b · Hermes Gateway · remote model",
-  args: { agentId: "hermes-gateway" },
+  args: { agentId: "hermes-gateway", initialPanel: "settings" },
 };
 export const AgentMenu: Story = {
-  name: "20 · Choose agent, keep harness",
+  name: "20 · Choose assignee in unified picker",
   args: { initialPanel: "agents" },
 };
 export const AgentSwitchClearsOverrides: Story = {
@@ -154,10 +159,9 @@ export const AgentSwitchClearsOverrides: Story = {
   play: async ({ canvasElement }) => {
     const screen = within(canvasElement.ownerDocument.body);
     await userEvent.click(screen.getByRole("option", { name: /Nora/ }));
-    await userEvent.click(screen.getByRole("button", { name: "Select model and effort" }));
     await expect(screen.getByRole("button", { name: "Choose exact model" })).toHaveTextContent("Claude Sonnet 4.6");
     await expect(screen.getByTestId("effort-unavailable")).toHaveTextContent("model default");
-    await expect(screen.queryByRole("checkbox", { name: "Fast mode" })).toBeNull();
+    await expect(screen.queryByRole("button", { name: "Fast mode" })).toBeNull();
   },
 };
 export const Mobile: Story = {

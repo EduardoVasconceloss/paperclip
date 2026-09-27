@@ -1,5 +1,5 @@
 import { useState, type CSSProperties } from "react";
-import { ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Plus, RotateCcw, Search, SlidersHorizontal, Zap } from "lucide-react";
+import { ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Plus, Search, Zap } from "lucide-react";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import { cn } from "@/lib/utils";
 import { composerAgents, effortChoices, effortLabels, fastModeAvailable, modelLabel, type ComposerAgent } from "./fixtures";
@@ -47,9 +47,8 @@ export function ComposerModelPickerPreview({
   const [modelOverride, setModelOverride] = useState<string | null>(initialModel ?? null);
   const [effortOverride, setEffortOverride] = useState<string | null>(initialEffort ?? null);
   const [fast, setFast] = useState(initialFast);
-  const [agentOpen, setAgentOpen] = useState(initialPanel === "agents");
-  const [pickerOpen, setPickerOpen] = useState(initialPanel === "settings" || initialPanel === "models");
-  const [view, setView] = useState<"settings" | "models">(initialPanel === "models" ? "models" : "settings");
+  const [pickerOpen, setPickerOpen] = useState(initialPanel !== "closed");
+  const [view, setView] = useState<"settings" | "models" | "agents">(initialPanel === "closed" ? "settings" : initialPanel);
   const [search, setSearch] = useState(initialSearch);
   const [draft, setDraft] = useState("");
   const [messages, setMessages] = useState<SentMessage[]>([]);
@@ -88,8 +87,7 @@ export function ComposerModelPickerPreview({
     setAgent(next);
     reset();
     setSearch("");
-    setAgentOpen(false);
-    setPickerOpen(false);
+    setView("settings");
   }
 
   function send() {
@@ -136,36 +134,13 @@ export function ComposerModelPickerPreview({
             <span className="hidden rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground sm:inline-flex">Auto mode</span>
             <span className="hidden min-w-0 flex-1 sm:block" />
 
-            <Popover open={agentOpen} onOpenChange={(open) => { setAgentOpen(open); if (open) setPickerOpen(false); }}>
-              <PopoverTrigger asChild>
-                <button type="button" aria-label="Select agent" className="flex h-8 shrink-0 items-center gap-1.5 rounded-md px-2 text-xs font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
-                  <span className="hidden sm:inline-flex"><AgentMark agent={agent} /></span>
-                  <span className="max-w-20 truncate">{agent.name}</span>
-                  <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent side="top" align="end" className="w-80 p-2" data-testid="composer-agent-menu">
-                <div className="px-2 py-1.5">
-                  <p className="text-xs font-semibold">Choose agent</p>
-                  <p className="text-xs text-muted-foreground">Each agent keeps its configured harness.</p>
-                </div>
-                <div className="max-h-72 overflow-y-auto" role="listbox" aria-label="Agents">
-                  {composerAgents.map((item) => <button type="button" role="option" aria-selected={agent.id === item.id} key={item.id} onClick={() => chooseAgent(item)} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
-                    <AgentMark agent={item} />
-                    <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.name}</span><span className="block truncate text-xs text-muted-foreground">{item.role}</span></span>
-                    <span className="text-xs text-muted-foreground">{item.harness}</span>
-                    {agent.id === item.id ? <Check className="composer-picker-accent size-3.5" aria-hidden /> : null}
-                  </button>)}
-                </div>
-              </PopoverContent>
-            </Popover>
-
-            {modelAvailable ? (
-              <Popover open={pickerOpen} onOpenChange={(open) => { setPickerOpen(open); if (open) setAgentOpen(false); else { setView("settings"); setSearch(""); } }}>
+            <Popover open={pickerOpen} onOpenChange={(open) => { setPickerOpen(open); if (!open) { setView("settings"); setSearch(""); } }}>
                 <PopoverTrigger asChild>
-                  <button type="button" aria-label="Select model and effort" className="flex h-8 min-w-0 max-w-48 items-center gap-1.5 rounded-full bg-muted px-2.5 text-xs font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" data-testid="composer-model-trigger">
-                    {fast && fastAvailable ? <Zap className="composer-picker-accent size-3.5 shrink-0" aria-hidden /> : <SlidersHorizontal className="size-3.5 shrink-0 text-muted-foreground" aria-hidden />}
-                    <span className="min-w-0 truncate">{modelLabel(agent, model)}</span>
+                  <button type="button" aria-label="Select assignee, model and effort" className="flex h-8 min-w-0 max-w-64 items-center gap-1.5 rounded-full bg-muted px-2.5 text-xs font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" data-testid="composer-model-trigger">
+                    <span className="hidden sm:inline-flex"><AgentMark agent={agent} /></span>
+                    <span className="max-w-20 shrink-0 truncate">{agent.name}</span>
+                    <span className="text-muted-foreground" aria-hidden>·</span>
+                    <span className="min-w-0 truncate text-muted-foreground">{modelAvailable ? modelLabel(agent, model) : "Harness default"}</span>
                     {effectiveEffort ? <span className="hidden shrink-0 text-muted-foreground sm:inline">{effortLabel}</span> : null}
                     <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />
                   </button>
@@ -173,18 +148,19 @@ export function ComposerModelPickerPreview({
                 <PopoverContent side="top" align="end" sideOffset={8} className="w-80 max-w-full p-0 shadow-sm" data-testid="composer-model-popover">
                   {view === "settings" ? (
                     <div className="p-3">
-                      <div className="flex items-start gap-2">
-                        <div className="min-w-0 flex-1">
-                          <p className="text-xs font-semibold">Run settings</p>
-                          <p className="truncate text-xs text-muted-foreground">{agent.harness}{agent.provider ? ` · ${agent.provider}` : ""}</p>
-                        </div>
-                        <button type="button" onClick={reset} aria-label="Reset model and effort to agent default" title="Reset to agent default" disabled={!modelOverride && !effortOverride && !fast} className="grid size-7 place-items-center rounded-md text-muted-foreground hover:bg-accent disabled:opacity-40"><RotateCcw className="size-3.5" aria-hidden /></button>
+                      <div className="flex items-center gap-2">
+                        <button type="button" onClick={() => setView("agents")} aria-label="Choose assignee" className="flex min-w-0 flex-1 items-center gap-2 rounded-md px-1 py-1 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring">
+                          <AgentMark agent={agent} />
+                          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{agent.name}</span><span className="block truncate text-xs text-muted-foreground">{agent.harness}{agent.provider ? ` · ${agent.provider}` : ""}</span></span>
+                          <ChevronDown className="size-4 shrink-0 text-muted-foreground" aria-hidden />
+                        </button>
+                        {fastAvailable ? <button type="button" onClick={() => setFast((current) => !current)} aria-label="Fast mode" aria-pressed={fast} title="Fast mode · faster responses, higher usage" className={cn("grid size-8 shrink-0 place-items-center rounded-md hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring", fast ? "composer-picker-accent bg-accent" : "text-muted-foreground")}><Zap className="size-4" aria-hidden /></button> : null}
                       </div>
-                      <button type="button" onClick={() => setView("models")} className="mt-3 flex w-full items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Choose exact model">
+                      {modelAvailable ? <button type="button" onClick={() => setView("models")} className="mt-3 flex w-full items-center gap-2 rounded-md border border-border bg-muted/30 px-3 py-2.5 text-left hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring" aria-label="Choose exact model">
                         <span className="min-w-0 flex-1"><span className="block text-xs text-muted-foreground">Model</span><span className="block truncate text-sm font-medium">{modelLabel(agent, model)}</span></span>
                         <ChevronRight className="size-4 shrink-0 text-muted-foreground" aria-hidden />
-                      </button>
-                      {choices.length ? (
+                      </button> : <div className="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="model-unavailable">{agent.noModelReason}</div>}
+                      {modelAvailable && choices.length ? (
                         <div className="mt-4 border-t border-border pt-3">
                           <div className="flex items-center justify-between gap-2">
                             <label htmlFor="composer-effort" className="text-xs text-muted-foreground">{agent.adapterType === "pi_local" ? "Thinking" : "Effort"}</label>
@@ -194,21 +170,29 @@ export function ComposerModelPickerPreview({
                             aria-valuetext={effortLabel} onChange={(event) => setEffortOverride(Number(event.target.value) === 0 ? null : choices[Number(event.target.value) - 1])}
                             className="composer-effort-range mt-4 w-full" style={{ "--fill": `${(effortIndex / choices.length) * 100}%` } as CSSProperties} />
                           <div className="mt-1.5 flex justify-between text-xs text-muted-foreground"><span>Default</span><span>{effortLabels[choices[choices.length - 1]] ?? choices[choices.length - 1]}</span></div>
-                          <div className="mt-2 flex flex-wrap gap-1" aria-label="Available effort levels">
-                            {choices.map((choice) => <button key={choice} type="button" onClick={() => setEffortOverride(choice)} aria-pressed={effectiveEffort === choice} className={cn("rounded-md px-1.5 py-1 text-xs hover:bg-accent", effectiveEffort === choice ? "bg-primary text-primary-foreground hover:bg-primary" : "text-muted-foreground")}>{effortLabels[choice] ?? choice}</button>)}
-                          </div>
                         </div>
-                      ) : (
+                      ) : modelAvailable ? (
                         <div className="mt-3 rounded-md bg-muted/40 px-3 py-2 text-xs text-muted-foreground" data-testid="effort-unavailable">
                           {agent.adapterType === "kimi_local" ? "This Kimi model does not advertise effort levels. It will use its own default." : agent.adapterType === "opencode_local" ? "Effort levels are not advertised for this OpenRouter model. It will use the model default." : customModel ? "Effort levels are unknown for this custom model. It will use the model default." : "This harness does not expose a per-message effort setting."}
                         </div>
-                      )}
-                      {fastAvailable ? <label className="mt-3 flex cursor-pointer items-center gap-2 border-t border-border pt-3 text-sm"><Zap className="composer-picker-accent size-4" aria-hidden /><span className="min-w-0 flex-1"><span className="block text-xs font-medium">Fast mode</span><span className="block text-xs text-muted-foreground">Faster responses · higher usage</span></span><input type="checkbox" checked={fast} onChange={(event) => setFast(event.target.checked)} aria-label="Fast mode" className="composer-picker-checkbox size-4" /></label> : null}
-                      {(modelOverride || effortOverride || fast) ? <p className="mt-3 text-xs text-muted-foreground">These settings apply to the next message. <button type="button" onClick={reset} className="font-medium text-foreground underline underline-offset-2">Reset to agent default</button></p> : null}
+                      ) : null}
+                      {(modelOverride || effortOverride || fast) ? <button type="button" onClick={reset} className="mt-3 text-xs text-muted-foreground underline underline-offset-2 hover:text-foreground">Reset to agent default</button> : null}
+                    </div>
+                  ) : view === "agents" ? (
+                    <div className="p-2" data-testid="composer-agent-menu">
+                      <div className="flex items-center gap-2 px-1 py-1.5"><button type="button" onClick={() => setView("settings")} aria-label="Back to selection" className="grid size-7 place-items-center rounded-md hover:bg-accent"><ArrowLeft className="size-4" aria-hidden /></button><div><p className="text-xs font-semibold">Choose assignee</p><p className="text-xs text-muted-foreground">Each agent keeps its configured harness.</p></div></div>
+                      <div className="max-h-72 overflow-y-auto" role="listbox" aria-label="Agents">
+                        {composerAgents.map((item) => <button type="button" role="option" aria-selected={agent.id === item.id} key={item.id} onClick={() => chooseAgent(item)} className="flex w-full items-center gap-2 rounded-md px-2 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none">
+                          <AgentMark agent={item} />
+                          <span className="min-w-0 flex-1"><span className="block truncate text-sm font-medium">{item.name}</span><span className="block truncate text-xs text-muted-foreground">{item.role}</span></span>
+                          <span className="text-xs text-muted-foreground">{item.harness}</span>
+                          {agent.id === item.id ? <Check className="composer-picker-accent size-3.5" aria-hidden /> : null}
+                        </button>)}
+                      </div>
                     </div>
                   ) : (
                     <div className="p-2">
-                      <div className="flex items-center gap-2 px-1 py-1.5"><button type="button" onClick={() => { setView("settings"); setSearch(""); }} aria-label="Back to run settings" className="grid size-7 place-items-center rounded-md hover:bg-accent"><ArrowLeft className="size-4" aria-hidden /></button><div className="min-w-0"><p className="text-xs font-semibold">Choose model</p><p className="truncate text-xs text-muted-foreground">{agent.harness}{agent.provider ? ` · ${agent.provider}` : ""}</p></div></div>
+                      <div className="flex items-center gap-2 px-1 py-1.5"><button type="button" onClick={() => { setView("settings"); setSearch(""); }} aria-label="Back to selection" className="grid size-7 place-items-center rounded-md hover:bg-accent"><ArrowLeft className="size-4" aria-hidden /></button><div className="min-w-0"><p className="text-xs font-semibold">Choose model</p><p className="truncate text-xs text-muted-foreground">{agent.harness}{agent.provider ? ` · ${agent.provider}` : ""}</p></div></div>
                       <div className="relative mt-2"><Search className="pointer-events-none absolute left-2.5 top-2.5 size-4 text-muted-foreground" aria-hidden /><input autoFocus type="search" value={search} onChange={(event) => setSearch(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && manualValid && !exactCatalogMatch) chooseModel(query); }} placeholder="Search or paste a model ID" aria-label="Search or paste a model ID" className="h-9 w-full rounded-md border border-border bg-background pl-8 pr-2 text-sm outline-none placeholder:text-muted-foreground focus-visible:ring-2 focus-visible:ring-ring" /></div>
                       <div className="mt-2 max-h-60 overflow-y-auto" role="listbox" aria-label={`${agent.harness} models`}>
                         {!query ? <button type="button" role="option" aria-selected={modelOverride === null} onClick={() => chooseModel(null)} className="flex w-full items-center gap-2 rounded-md px-2.5 py-2 text-left hover:bg-accent focus-visible:bg-accent focus-visible:outline-none"><span className="min-w-0 flex-1"><span className="block text-sm font-medium">Use agent default</span><span className="block truncate text-xs text-muted-foreground">{modelLabel(agent, agent.defaultModel ?? "")}</span></span>{modelOverride === null ? <Check className="composer-picker-accent size-4" aria-hidden /> : null}</button> : null}
@@ -221,11 +205,9 @@ export function ComposerModelPickerPreview({
                   )}
                 </PopoverContent>
               </Popover>
-            ) : <span className="hidden max-w-40 truncate rounded-full bg-muted px-2.5 py-1.5 text-xs text-muted-foreground sm:inline-flex" title={agent.noModelReason}>Model set by harness</span>}
             <button type="button" onClick={send} disabled={!draft.trim()} aria-label="Send message" className="grid size-8 shrink-0 place-items-center rounded-full bg-primary text-primary-foreground disabled:opacity-40"><ArrowUp className="size-4" aria-hidden /></button>
           </div>
         </div>
-        {!modelAvailable ? <p className="mt-2 text-right text-xs text-muted-foreground">{agent.noModelReason}</p> : null}
       </div>
     </div>
   );

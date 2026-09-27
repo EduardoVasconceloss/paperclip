@@ -29,4 +29,3 @@
 .composer-effort-range:focus-visible { outline: calc(var(--spacing) * 0.5) solid var(--ring); outline-offset: calc(var(--spacing) * 0.5); }
 
 .composer-picker-accent { color: var(--tc-mode-ask); }
-.composer-picker-checkbox { accent-color: var(--tc-mode-ask); }
