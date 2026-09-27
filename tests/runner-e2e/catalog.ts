@@ -874,6 +874,31 @@ export const daytonaWarmContinuityTask: RunnerTaskFixture = {
   },
 };
 
+export const unsafeWorkspaceExportTask: RunnerTaskFixture = {
+  id: "unsafe-link-export",
+  label: "Preserve work after an unsafe workspace export",
+  groups: ["recovery"], workMode: "standard", flow: "workspace_export_rejection",
+  expectedRunCount: 1,
+  attemptTimeoutMs: { local: 10 * 60_000, daytona: 10 * 60_000 },
+  expectedTerminalState: { issue: "blocked", run: "failed" },
+  buildTitle: nonce => `Runner E2E unsafe export ${nonce}`,
+  buildVisibleMarker: nonce => `EXPORT-PRESERVED-${nonce}`,
+  buildPrompt: nonce => [
+    "This is a bounded workspace export regression in a disposable sandbox. Work only in the current execution workspace.",
+    `Create safe-work-${nonce}.txt containing exactly PRESERVED-${nonce} followed by a newline.`,
+    `Create a symbolic link named unsafe-export-${nonce} whose target is exactly /paperclip-e2e-nonexistent-${nonce}. This target is deliberately nonexistent: never create, read, or write the target.`,
+    "Verify the regular file bytes and the link's target using readlink. Keep both workspace entries unchanged after verification; the operator will inspect the export failure.",
+    `Use the current turn completion revision and criterion IDs, then call paperclip_finish exactly once with {reportedWorkDisposition:"done",summary:"EXPORT-PRESERVED-${nonce}",completionClaim:{contractRevision:CURRENT_TURN_REVISION,objectiveSatisfied:true,criteria:[{criterionId:"objective",status:"satisfied",evidenceRefs:[]}],remainingWork:[]},evidence:[],verification:[{commandOrCheck:"read safe fixture file and readlink unsafe fixture link",status:"passed"}]}. CURRENT_TURN_REVISION is a placeholder for the supplied completion revision. Wait for success, then finish with EXPORT-PRESERVED-${nonce}.`,
+    "Do not repair the deliberately invalid link, run package installation, use the network, create child tasks, or submit another provider turn.",
+  ].join("\n"),
+  buildMatchers: (_nonce, execution) => [
+    { kind: "issue_status", expected: "blocked" },
+    { kind: "run_status", expected: "failed" },
+    { kind: "runtime_mode", expected: execution.profile.expectedRuntimeMode },
+    { kind: "environment", expected: "daytona" },
+  ],
+};
+
 const codexContinuityProfiles = runnerProfiles.filter((profile) =>
   ["legacy-codex", "runner-codex"].includes(profile.id),
 );
@@ -911,6 +936,13 @@ const everydayProfiles = [
 ].map(productionStoryProfile);
 
 export const runnerSuites: readonly RunnerSuiteFixture[] = [
+  {
+    id: "daytona-workspace-recovery", label: "Daytona workspace export recovery", manualOnly: true,
+    description: "One accepted native result survives a permanent unsafe export rejection without replay or automatic retry.",
+    groups: ["daytona", "native"], profiles: runnerProfiles.filter(profile => profile.id === "runner-codex"),
+    environments: [daytonaWarmEnvironment], tasks: [unsafeWorkspaceExportTask], expectedMatrixSize: 1,
+    definitionMetadata: { version: 1, oracle: "first-failure-accepted-result-retained-sandbox", providerTurns: 1 },
+  },
   {
     id: "continuation-accounting", label: "Continuation accounting baseline", manualOnly: true,
     description: "Structured productive steps, bounded repair, restart and late gates; comments cannot buy more attempts.",

@@ -1042,3 +1042,23 @@ keys with low request limits. It can only lower the configured campaign limit.
 Keep subscription qualification separate from API-key results.
 
 The explicit-only eight-cell [continuation accounting baseline](CONTINUATION-ACCOUNTING.md) tests productive work, bounded repair, restart and late gates with real providers.
+
+## Permanent workspace export rejection
+
+`daytona-workspace-recovery.runner-codex.daytona.unsafe-link-export` is an
+explicit-only, one-provider-turn cell (ten-minute bound). A browser-created task
+writes a safe nonce file and a dangling absolute symlink in its disposable
+Daytona workspace, then submits a successful semantic result. The independent
+oracle reads public run events, recovery actions and lease records. It requires
+one accepted result and successful provider terminal event, immediate permanent
+export failure on attempt one, a blocked task with board repair ownership and no
+retry, an exact stopped-sandbox receipt, and no escaped link on the host.
+
+The first failure is captured before an unfixed controller's scheduled retry.
+A successful fixed run retains the sandbox until the ordinary fixture teardown
+explicitly destroys it; no private state injection or extraction exception is
+used. Normal screenshot, secret scanning, billing and cleanup reporting apply.
+Select this cell explicitly after credential-free checks and immutable image
+setup; `--all` excludes it. See `workspace-export.json` in the attempt snapshots
+for each independent assertion. Missing stop receipts or accepted-result
+evidence fail the cell.

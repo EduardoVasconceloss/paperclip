@@ -260,3 +260,10 @@ specific process signal, never a name-based or machine-wide process kill.
 The bounded fixture command is released even on failure; normal instance cleanup
 still owns all disposable processes and files. No credentials enter the prompt,
 fault metadata, or structured grading fixtures.
+
+The explicit `daytona-workspace-recovery` negative export fixture creates only
+a task-owned dangling symlink to `/paperclip-e2e-nonexistent-<nonce>` inside its
+fresh sandbox. It never creates or follows that target, reads private files, or
+relaxes the host extraction guard. The host oracle uses `lstat` on the known
+workspace entry. The accepted result and provider stop receipt are read through
+normal public APIs; teardown deletes only the fixture's environment and leases.
