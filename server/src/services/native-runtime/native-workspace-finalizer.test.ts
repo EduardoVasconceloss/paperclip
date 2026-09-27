@@ -170,6 +170,28 @@ describe("native workspace finalization recovery", () => {
     expect(await db.select().from(workspaceOperations).where(eq(workspaceOperations.heartbeatRunId, seeded.runId))).toHaveLength(2);
   });
 
+  it.each(["terminal_failure", "retryable_failure"] as const)(
+    "rechecks %s admission before a delayed recovery starts another export",
+    async (phase) => {
+      const seeded = await seedRun({ executionWorkspaceId: randomUUID(), title: "Delayed recovery admission" });
+      await db.insert(workspaceOperations).values({ companyId, heartbeatRunId: seeded.runId,
+        issueId: seeded.issueId, phase: "workspace_finalize", status: "failed",
+        stderrExcerpt: "workspace_sync_out_unsafe_archive\n" });
+      // A sweep can select its run before live copyback publishes this outcome,
+      // then enter the export path only after the live owner releases its lock.
+      await db.update(nativeRunFinalizations).set({ phase,
+        failureCode: "native_workspace_sync_out_unsafe_archive",
+        failureDetail: { workspaceFinalizeAttempt: 1, recoveryOwner: { kind: "board" } },
+        nextAttemptAt: phase === "retryable_failure" ? new Date(Date.now() + 60_000) : null,
+      }).where(eq(nativeRunFinalizations.runId, seeded.runId));
+      const [before] = await db.select().from(nativeRunFinalizations).where(eq(nativeRunFinalizations.runId, seeded.runId));
+      expect(await resumeNativeWorkspaceFinalization({ db, runId: seeded.runId })).toBeNull();
+      expect(await db.select().from(workspaceOperations).where(eq(workspaceOperations.heartbeatRunId, seeded.runId))).toHaveLength(1);
+      const [after] = await db.select().from(nativeRunFinalizations).where(eq(nativeRunFinalizations.runId, seeded.runId));
+      expect(after).toEqual(before);
+    },
+  );
+
   it("keeps ordinary progress writable even when the application pool has one connection", async () => {
     const seeded = await seedRun({ executionWorkspaceId: randomUUID(), title: "Small application pool" });
     const smallPool = createDb(temporary.connectionString, { maxConnections: 1 });

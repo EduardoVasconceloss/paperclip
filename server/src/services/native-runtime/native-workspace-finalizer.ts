@@ -75,6 +75,23 @@ export async function resumeNativeWorkspaceFinalization(input: {
   const owned = await withNativeWorkspaceFinalizationOwnership({
     db: input.db, companyId: bound.companyId, runId: input.runId,
   }, async (ownership) => {
+  // A sweep can be admitted before the live owner publishes a permanent
+  // failure or retry delay, then acquire ownership after that owner releases.
+  // Recheck admission inside the lock before any copyback or operation receipt.
+  const admission = await input.db.select({
+    phase: nativeRunFinalizations.phase,
+    nextAttemptAt: nativeRunFinalizations.nextAttemptAt,
+    resultId: nativeRunFinalizations.resultId,
+  }).from(nativeRunFinalizations).where(and(
+    eq(nativeRunFinalizations.runId, input.runId),
+    eq(nativeRunFinalizations.companyId, bound.companyId),
+    eq(nativeRunFinalizations.issueId, bound.issueId),
+  )).limit(1).then((rows) => rows[0] ?? null);
+  if (!admission || admission.resultId !== bound.resultId) {
+    throw new Error("native_workspace_finalization_binding_missing");
+  }
+  if (admission.phase === "terminal_failure"
+    || (admission.nextAttemptAt && admission.nextAttemptAt > new Date())) return null;
   const successful = await input.db.select().from(workspaceOperations).where(and(
     eq(workspaceOperations.companyId, bound.companyId),
     eq(workspaceOperations.heartbeatRunId, input.runId),

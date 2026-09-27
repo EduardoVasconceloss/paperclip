@@ -567,16 +567,20 @@ describeEmbeddedPostgres("native run finalizer / status decision committer — a
       .toEqual([expect.objectContaining({ status: "active", ownerType: "agent", cause: "native_finalization_invalid" })]);
   });
 
-  it("does not reopen a board-owned terminal workspace repair for a late generic failure", async () => {
+  it.each(["native_workspace_sync_out_unrecoverable", "native_workspace_sync_out_unsafe_archive"])(
+    "does not reopen board-owned %s repair for a late failure", async (failureCode) => {
     const fixture = await seedNativeRun();
     await db.insert(nativeRunFinalizations).values({
       runId: fixture.runId, companyId, issueId: fixture.issueId, phase: "workspace_finalizing",
     });
     await recordNativeFinalizationFailure({ db, runId: fixture.runId,
-      error: new Error("native_workspace_sync_out_unrecoverable"), failureScope: "workspace", permanent: true });
+      error: new Error(failureCode), failureScope: "workspace", permanent: true });
     const [before] = await db.select().from(nativeRunFinalizations).where(eq(nativeRunFinalizations.runId, fixture.runId));
     const recoveryBefore = await db.select().from(issueRecoveryActions).where(eq(issueRecoveryActions.sourceIssueId, fixture.issueId));
-    await recordNativeFinalizationFailure({ db, runId: fixture.runId, error: new Error("native_finalization_invalid") });
+    for (const failureScope of [undefined, "workspace"] as const) {
+      await recordNativeFinalizationFailure({ db, runId: fixture.runId,
+        error: new Error("native_workspace_sync_out_failed"), failureScope });
+    }
     const [after] = await db.select().from(nativeRunFinalizations).where(eq(nativeRunFinalizations.runId, fixture.runId));
     expect(after).toEqual(before);
     expect(await db.select().from(issueRecoveryActions).where(eq(issueRecoveryActions.sourceIssueId, fixture.issueId))).toEqual(recoveryBefore);

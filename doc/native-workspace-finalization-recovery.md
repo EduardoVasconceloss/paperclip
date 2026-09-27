@@ -3,7 +3,9 @@
 Native workspace export and merge acquire a PostgreSQL advisory lock scoped to
 company and run before the first physical copyback. The live heartbeat and the
 reconciler share that lock. Recovery skips a busy owner without recording another
-workspace operation or spending a retry. A completed workspace barrier is reread
+workspace operation or spending a retry. Recovery also rechecks the coordinator's terminal state and retry time under ownership: an earlier sweep snapshot cannot
+start another export after live finalization publishes a permanent repair or delay.
+A completed workspace barrier is reread
 under ownership before export, and a committed coordinator cannot be overwritten
 by a late failure receipt.
 
