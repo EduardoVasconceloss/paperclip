@@ -12203,6 +12203,10 @@ async function createRunnerdBackendWithinSessionClaim(
       "codex-home",
       "opencode",
       "acpx",
+      // Backups belong to the retired provider session. Leaving them active
+      // makes the fresh replacement look like ambiguous lost harness state.
+      // Keep their evidence inside the same continuity-break archive.
+      "failover-backups",
     ]) {
       const source = resolve(root, name);
       if (existsSync(source)) renameSync(source, resolve(archiveRoot, name));

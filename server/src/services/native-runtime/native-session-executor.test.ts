@@ -10642,6 +10642,69 @@ describe("runnerd provider runtime wiring", () => {
     );
   });
 
+  it("archives failover evidence with an explicitly replaced provider session", async () => {
+    const remoteCwd = join(isolatedStateDirectory, "remote");
+    const remoteExecute = vi.fn(async (command: { command: string; args?: string[] }) => {
+      if (command.args?.[0] === "--build-metadata") return {
+        exitCode: 0, timedOut: false, stdout: JSON.stringify({
+          schema: "paperclip-runner/runnerd-build-metadata/v1", binaryName: "paperclip-runnerd",
+          packageName: "@paperclipai/paperclip-runner", binaryContractVersion: 2,
+          durableSessionCapabilities: ["unlimited_runtime", "connection_lease_renewal"],
+          prpTransportModes: ["listen_ws"],
+        }), stderr: "",
+      };
+      if (command.args?.[0] === "--version") return {
+        exitCode: 0, timedOut: false, stdout: "codex-cli 0.156.0", stderr: "",
+      };
+      if (command.args?.[1]?.includes("base64")) return {
+        exitCode: 1, timedOut: false, stdout: "", stderr: "",
+      };
+      return { exitCode: 0, timedOut: false, stdout: "", stderr: "" };
+    });
+    let prepareReplacement!: () => Promise<void>;
+    const replacement = { close: vi.fn(async () => undefined) };
+    const openSession = vi.fn(async () => {
+      await prepareReplacement();
+      return replacement;
+    });
+    state.createBackend.mockReturnValueOnce({ kind: "test", openSession } as never);
+    const backend = await createRunnerdBackend({
+      db: leaseDb(execution), execution, runnerInstanceId: "runner-replacement",
+      runnerIngressAuthorized: true,
+      runnerExecutionTarget: {
+        kind: "remote", transport: "sandbox", remoteCwd, environmentId: "environment",
+        leaseId: "lease-created", providerKey: "daytona", reusableLeaseConfigured: true,
+        effectiveCapabilities: { runnerWebSocketIngress: true },
+        sandboxLeaseAcquisition: { outcome: "created", providerLeaseId: "sandbox-created" },
+        runner: { execute: remoteExecute, syncIn: vi.fn(async () => undefined) },
+      } as never,
+    });
+    state.createBackend.mock.calls.at(-1)![1].codexTransportFactory!();
+    const options = state.createTransport.mock.calls.at(-1)![0] as RunnerTransportOptions & {
+      prepareExternalRunnerState: () => Promise<void>;
+    };
+    prepareReplacement = options.prepareExternalRunnerState;
+    const root = options.stateDirectory!;
+    for (const name of ["current", "previous"]) {
+      await mkdir(join(root, "failover-backups", name), { recursive: true });
+      await writeFile(join(root, "failover-backups", name, "manifest.json"), JSON.stringify({ priorSession: name }));
+    }
+    // Ambiguous ordinary recovery must still fail closed. Only the runtime's
+    // explicitly admitted replacement may retire these prior-session backups.
+    await expect(prepareReplacement()).rejects.toThrow("runner_harness_state_mismatch");
+    await expect(backend.openReplacementSession!({
+      identity: { runId: execution.binding.runId }, workingDirectory: execution.workspace.cwd,
+    } as never)).resolves.toBe(replacement);
+    expect(openSession).toHaveBeenCalledOnce();
+    await expect(access(join(root, "failover-backups"))).rejects.toThrow();
+    const archives = await readdir(join(root, "continuity-breaks"));
+    expect(archives).toHaveLength(1);
+    for (const name of ["current", "previous"]) {
+      expect(JSON.parse(await readFile(join(root, "continuity-breaks", archives[0]!, "failover-backups", name, "manifest.json"), "utf8")))
+        .toEqual({ priorSession: name });
+    }
+  });
+
   it.each(["fresh", "existing_state", "symlink_parent", "wrong_identity", "connected", "pending_turn", "remote_probe_failed", "backup_present"])(
     "bootstraps only an untouched provider session in a resumed workspace lease: %s", async (scenario) => {
     const remoteCwd = join(isolatedStateDirectory, "remote");
