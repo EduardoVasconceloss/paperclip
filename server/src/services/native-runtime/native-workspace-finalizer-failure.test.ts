@@ -2,6 +2,10 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { Db } from "@paperclipai/db";
 
 const sync = vi.hoisted(() => ({ resume: vi.fn() }));
+vi.mock("./native-workspace-finalization-ownership.js", () => ({
+  withNativeWorkspaceFinalizationOwnership: async (_input: unknown, action: (owner: unknown) => unknown) =>
+    ({ acquired: true, value: await action({ token: "fixture-owner", assertHeld: async () => {} }) }),
+}));
 vi.mock("./native-workspace-sync.js", () => ({
   readNativeWorkspaceSyncReference: () => ({ leaseId: "lease", providerLeaseId: "sandbox", workspaceId: "workspace" }),
   resumeNativeWorkspaceSync: sync.resume,
@@ -21,7 +25,7 @@ function fixtureDb(): Db {
   const responses = [[{
     companyId: "company", runtimeMode: "native", issueId: "issue", resultId: "result",
     runnerProfileJson: { nativeWorkspaceSync: {}, nativeExecutionInput: { binding: {} } },
-  }], []];
+  }], [{ phase: "result_accepted", nextAttemptAt: null, resultId: "result" }], []];
   return { select: () => {
     const query = {
       from: () => query, innerJoin: () => query, where: () => query, orderBy: () => query,
