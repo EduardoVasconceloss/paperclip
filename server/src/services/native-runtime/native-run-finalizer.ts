@@ -571,7 +571,9 @@ export async function recordNativeFinalizationFailure(input: {
     nextAction:
       input.failureScope === "workspace"
         ? input.permanent
-          ? "Restore the exact sandbox containing the unexported workspace changes, or resolve the task manually from durable evidence."
+          ? failureCode === "native_workspace_sync_out_unsafe_archive"
+            ? "Repair the unsafe link or path in the retained sandbox, then retry workspace export without submitting another provider turn."
+            : "Restore the exact sandbox containing the unexported workspace changes, or resolve the task manually from durable evidence."
           : "Retry workspace export and merge from the retained sandbox; do not submit another provider turn."
         : "Repair the persisted native result or contract discriminator, then resume finalization from the coordinator.",
     projectRunStatus: input.projectRunStatus,

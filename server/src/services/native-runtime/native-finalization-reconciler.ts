@@ -33,6 +33,7 @@ import { issueRecoveryActionService } from "../issue-recovery-actions.js";
 import { issueService } from "../issues.js";
 import { emitAgentTaskRun } from "../agent-task-run-telemetry.js";
 import { reportRunFailure } from "../run-failure-report.js";
+import { classifyNativeWorkspaceFailure } from "./native-workspace-failure.js";
 import { resumeNativeWorkspaceFinalization } from "./native-workspace-finalizer.js";
 import { dismissObsoleteNativePolicyReviews } from "./obsolete-policy-reviews.js";
 import {
@@ -860,20 +861,14 @@ export async function reconcileNativeFinalizations(
       const workspaceFinalizeStatus =
         operation.status === "succeeded" ? "succeeded" : "failed";
       if (workspaceFinalizeStatus === "failed") {
-        const unrecoverable = operation.stderrExcerpt?.includes(
-          "workspace_sync_out_unrecoverable",
-        );
+        const workspaceFailure = classifyNativeWorkspaceFailure(new Error(operation.stderrExcerpt ?? ""));
         const failure = await recordNativeFinalizationFailure({
           db,
           runId: row.runId,
-          error: new Error(
-            unrecoverable
-              ? "native_workspace_sync_out_unrecoverable"
-              : "native_workspace_sync_out_failed",
-          ),
+          error: new Error(workspaceFailure.failureCode),
           projectRunStatus: true,
           failureScope: "workspace",
-          permanent: unrecoverable,
+          permanent: workspaceFailure.permanent,
         });
         results.push({
           ...failure,
