@@ -765,7 +765,7 @@ describe("mapFinalResultForTest", () => {
     expect(result.errorMessage).toBe("boom");
   });
 
-  it("reads Hermes cache_read_tokens as cached input", () => {
+  it("reads Hermes cache_read_tokens as cached input, outside input_tokens", () => {
     const result = mapFinalResultForTest({
       terminal: {
         runId: "run-1",
@@ -780,6 +780,6 @@ describe("mapFinalResultForTest", () => {
       sessionKey: "session-key",
       strategy: "issue",
     });
-    expect(result.usage).toEqual({ inputTokens: 620, outputTokens: 7, cachedInputTokens: 570 });
+    expect(result.usage).toEqual({ inputTokens: 50, outputTokens: 7, cachedInputTokens: 570 });
   });
 });
