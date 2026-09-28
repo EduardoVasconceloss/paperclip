@@ -59,6 +59,7 @@ import { useOptionalToastActions } from "../context/ToastContext";
 import { copyTextToClipboard } from "../lib/clipboard";
 import {
   loadDraft,
+  loadDraftIfAvailable,
   saveDraft,
   clearDraft,
   loadDraftAttachments,
@@ -4691,6 +4692,7 @@ const IssueChatComposer = forwardRef<
   }, [draftKey]);
   const bodyRef = useRef(body);
   bodyRef.current = body;
+  const reconciledSubmissionRef = useRef<{ draftKey: string | undefined; attemptId: string } | null>(null);
   const pendingDraftRef = useRef<{
     draftKey: string;
     attemptId: string;
@@ -4822,16 +4824,45 @@ const IssueChatComposer = forwardRef<
   // Text equality is not delivery proof: users may intentionally repeat text.
   useEffect(() => {
     if (!uncertainSubmission || !confirmedSubmissionIds.has(uncertainSubmission.attemptId)) return;
-    const nextDraft = uncertainSubmission.nextDraftOffset === undefined
+    const { attemptId } = uncertainSubmission;
+    const reconciled = reconciledSubmissionRef.current;
+    if (reconciled && reconciled.draftKey === draftKey && reconciled.attemptId === attemptId) return;
+    let nextDraft = uncertainSubmission.nextDraftOffset === undefined
       ? "" : bodyRef.current.slice(uncertainSubmission.nextDraftOffset);
-    if (draftKey && !settleDraftSubmission(draftKey, uncertainSubmission.attemptId, nextDraft)) return;
+    let storedAttachments: ComposerAttachmentItem[] | null = null;
+    if (draftKey) {
+      const retained = loadDraftSubmission(draftKey);
+      if (retained && retained.attemptId !== attemptId) {
+        // Another attempt owns storage. Adopt its snapshot without settling it.
+        setUncertainSubmission(retained);
+        const storedDraft = loadDraft(draftKey);
+        setBody(storedDraft);
+        bodyRef.current = storedDraft;
+        setComposerAttachments(loadDraftAttachments(draftKey).map(item => ({
+          ...item, size: item.size ?? 0, id: `receipt:${item.attachmentId}`, status: "attached",
+        })));
+        return;
+      }
+      if (!settleDraftSubmission(draftKey, attemptId, nextDraft)) {
+        const storedDraft = loadDraftIfAvailable(draftKey);
+        if (storedDraft !== null && storedDraft !== bodyRef.current) {
+          // Another tab already settled this receipt. Its newer draft wins.
+          nextDraft = storedDraft;
+          storedAttachments = loadDraftAttachments(draftKey).map(item => ({
+            ...item, size: item.size ?? 0, id: `receipt:${item.attachmentId}`, status: "attached",
+          }));
+        }
+        // With unavailable storage, the confirmed in-memory attempt still settles.
+      }
+    }
+    reconciledSubmissionRef.current = { draftKey, attemptId };
     setUncertainSubmission(null);
     setBody(nextDraft);
     bodyRef.current = nextDraft;
     const submittedIds = uncertainSubmission.submittedAttachmentIds;
-    setComposerAttachments(current => submittedIds
+    setComposerAttachments(current => storedAttachments ?? (submittedIds
       ? current.filter(item => !item.attachmentId || !submittedIds.includes(item.attachmentId))
-      : []);
+      : []));
   }, [confirmedSubmissionIds, draftKey, uncertainSubmission]);
 
   useEffect(() => {

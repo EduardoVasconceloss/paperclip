@@ -15,6 +15,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "@paperclipai/shared";
 import { CommentSubmissionUnknownError } from "../lib/comment-submit-result";
+import { settleDraftSubmission } from "../lib/composer-draft";
 import {
   IssueAssigneePausedNotice,
   IssueChatThread,
@@ -3325,6 +3326,98 @@ describe("IssueChatThread", () => {
       act(() => root.unmount());
     }
     expect(localStorage.getItem(key)).toBe(nextDraft);
+  });
+
+  it.each(["submission write", "all storage"])(
+    "unlocks a confirmed in-memory submission after failed %s",
+    async (failure) => {
+      const key = "unavailable-submission-storage";
+      const originalSetItem = localStorage.setItem.bind(localStorage);
+      const write = vi.spyOn(localStorage, "setItem").mockImplementation((key, value) => {
+        if (failure === "all storage" || key.endsWith(":submission:v1")) throw new Error("Storage unavailable");
+        originalSetItem(key, value);
+      });
+      const read = failure === "all storage"
+        ? vi.spyOn(localStorage, "getItem").mockImplementation(() => { throw new Error("Storage unavailable"); })
+        : null;
+      let rejectSend!: (error: Error) => void;
+      const onAdd = vi.fn().mockReturnValueOnce(new Promise<void>((_, reject) => { rejectSend = reject; })).mockResolvedValue(undefined);
+      const root = createRoot(container);
+      const element = (attemptId?: string) => (
+        <MemoryRouter>
+          <IssueChatThread
+            comments={attemptId ? [{ ...issueChatLongThreadComments[0]!, id: "confirmed-memory-comment", body: "Earlier message", authorAgentId: null, authorUserId: "user-1", clientRequestId: attemptId }] : []}
+            currentUserId="user-1" linkedRuns={[]} timelineEvents={[]} liveRuns={[]}
+            onAdd={onAdd} draftKey={key} enableLiveTranscriptPolling={false}
+          />
+        </MemoryRouter>
+      );
+      const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Issue chat editor"]')!;
+      const type = (value: string) => act(() => {
+        Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(editor(), value);
+        editor().dispatchEvent(new Event("input", { bubbles: true }));
+      });
+      const send = () => Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Send") as HTMLButtonElement;
+      try {
+        await act(async () => root.render(element()));
+        type("Earlier message");
+        await act(async () => send().click());
+        const attemptId = onAdd.mock.calls[0]![4] as string;
+        type("The full next draft");
+        await act(async () => rejectSend(new CommentSubmissionUnknownError()));
+        expect(container.textContent).toContain("We couldn’t confirm");
+        await act(async () => root.render(element(attemptId)));
+        expect(editor().value).toBe("The full next draft");
+        expect(container.textContent).not.toContain("We couldn’t confirm");
+        expect(send().disabled).toBe(false);
+        await act(async () => send().click());
+        expect(onAdd.mock.calls[1]![0]).toBe("The full next draft");
+      } finally {
+        await act(async () => root.unmount());
+        write.mockRestore();
+        read?.mockRestore();
+      }
+    },
+  );
+
+  it.each(["settled", "newer attempt"])("adopts another tab's draft after %s without overwriting it", async (outcome) => {
+    const key = "cross-tab-settled-submission";
+    const attemptId = "aaf8228f-0be7-45ae-a104-6fbe0af6f1d3";
+    localStorage.setItem(key, "Earlier message\n\nThis tab's next draft");
+    localStorage.setItem(`${key}:submission:v1`, JSON.stringify({ version: 1, draftKey: key, attemptId, reviewed: false, nextDraftOffset: 17, submittedAttachmentIds: [] }));
+    const root = createRoot(container);
+    const element = (confirmed: boolean) => (
+      <MemoryRouter>
+        <IssueChatThread
+          comments={confirmed ? [{ ...issueChatLongThreadComments[0]!, id: "confirmed-cross-tab-comment", body: "Earlier message", authorAgentId: null, authorUserId: "user-1", clientRequestId: attemptId }] : []}
+          currentUserId="user-1" linkedRuns={[]} timelineEvents={[]} liveRuns={[]}
+          onAdd={async () => {}} draftKey={key} enableLiveTranscriptPolling={false}
+        />
+      </MemoryRouter>
+    );
+    try {
+      await act(async () => root.render(element(false)));
+      expect(settleDraftSubmission(key, attemptId, "Newer text saved by another tab")).toBe(true);
+      const newerId = "baf8228f-0be7-45ae-a104-6fbe0af6f1d3";
+      if (outcome === "newer attempt") localStorage.setItem(`${key}:submission:v1`, JSON.stringify({ version: 1, draftKey: key, attemptId: newerId, reviewed: false }));
+      const attachmentId = "caf8228f-0be7-45ae-a104-6fbe0af6f1d3";
+      localStorage.setItem(`${key}:attachments:v1`, JSON.stringify({ version: 1, draftKey: key, attachments: [{ attachmentId, name: "another-tab.txt", inline: false, contentPath: `/api/attachments/${attachmentId}/content` }] }));
+      await act(async () => root.render(element(true)));
+      expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Issue chat editor"]')!.value).toBe("Newer text saved by another tab");
+      if (outcome === "settled") {
+        expect(container.textContent).not.toContain("We couldn’t confirm");
+        expect(localStorage.getItem(`${key}:submission:v1`)).toBeNull();
+      } else {
+        expect(container.textContent).toContain("We couldn’t confirm");
+        expect(localStorage.getItem(`${key}:submission:v1`)).toContain(newerId);
+      }
+      expect(container.textContent).toContain("another-tab.txt");
+      expect(localStorage.getItem(`${key}:attachments:v1`)).toContain(attachmentId);
+      expect(localStorage.getItem(key)).toBe("Newer text saved by another tab");
+    } finally {
+      await act(async () => root.unmount());
+    }
+    expect(localStorage.getItem(key)).toBe("Newer text saved by another tab");
   });
 
   it("stores and restores the composer draft per issue key", () => {

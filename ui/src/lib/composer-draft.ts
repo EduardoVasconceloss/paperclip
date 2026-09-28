@@ -18,10 +18,15 @@ function draftStorage(draftKey: string): Storage {
 }
 
 export function loadDraft(draftKey: string): string {
+  return loadDraftIfAvailable(draftKey) ?? "";
+}
+
+/** Distinguish an empty stored draft from unavailable browser storage. */
+export function loadDraftIfAvailable(draftKey: string): string | null {
   try {
     return draftStorage(draftKey).getItem(draftKey) ?? "";
   } catch {
-    return "";
+    return null;
   }
 }
 
