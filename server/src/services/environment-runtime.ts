@@ -1671,7 +1671,14 @@ function createSandboxEnvironmentDriver(
     return runParent !== undefined ? runWithRuntimeParent(runParent, call) : call();
   }
 
-  async function resolveSandboxProviderPlugin(input: { provider: string }) {
+  async function resolveSandboxProviderPlugin(input: { provider: string; pluginId?: string }) {
+    if (input.pluginId) {
+      const pinned = await resolvePluginSandboxProviderDriverById({ db, pluginId: input.pluginId, driverKey: input.provider });
+      if (!pinned) return { state: "missing" as const, resolved: null };
+      if (pinned.plugin.status !== "ready") return { state: "not_ready" as const, resolved: pinned };
+      if (!pluginWorkerManager?.isRunning(pinned.plugin.id)) return { state: "worker_unavailable" as const, resolved: pinned };
+      return { state: "running" as const, resolved: pinned };
+    }
     const running = await resolvePluginSandboxProviderDriverByKey({
       db,
       driverKey: input.provider,
@@ -2614,7 +2621,9 @@ function createSandboxEnvironmentDriver(
             `Sandbox provider "${recordedProvider}" needs a plugin worker manager for cleanup, but none is available.`,
           );
         }
-        const pluginProvider = await resolveSandboxProviderPlugin({ provider: recordedProvider });
+        const pinnedPluginId = exportResume ? readString(input.lease.metadata?.pluginId) : null;
+        if (exportResume && !pinnedPluginId) throw new Error("Workspace export cleanup has no recorded provider plugin.");
+        const pluginProvider = await resolveSandboxProviderPlugin({ provider: recordedProvider, ...(pinnedPluginId ? { pluginId: pinnedPluginId } : {}) });
         if (pluginProvider.state !== "running") {
           throw new Error(
             `Sandbox provider plugin for "${recordedProvider}" is ${pluginProvider.state}, so the cleanup teardown cannot run yet.`,
@@ -2711,6 +2720,12 @@ function createSandboxEnvironmentDriver(
       // teardown runs, throws its own "no worker manager" error, and counts
       // toward the cap.
       if (!pluginWorkerManager) return true;
+      if (hasNativeWorkspaceExportResume(input.lease)) {
+        const pinnedPluginId = readString(input.lease.metadata?.pluginId);
+        if (!pinnedPluginId) return true; // Permanent invalid intent, never a by-key fallback.
+        const pinned = await resolvePluginSandboxProviderDriverById({ db, pluginId: pinnedPluginId, driverKey: recordedProvider });
+        return Boolean(pinned?.plugin.status === "ready" && pluginWorkerManager.isRunning(pinned.plugin.id));
+      }
       // Resolve the installed plugin without a wait. A plugin reload or a plugin
       // reinstall can remove the plugin row for a short window, so a missing
       // plugin is a transient condition, not a permanent one. Report not ready,

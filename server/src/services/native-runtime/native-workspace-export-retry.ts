@@ -38,7 +38,8 @@ export async function retryNativeWorkspaceExport(input: {
     if (!reference || reference.state !== "prepared" || reference.resourceDisposition === "destroy") throw changed();
     const lease = await one(db.select().from(environmentLeases).where(and(eq(environmentLeases.companyId, input.companyId), eq(environmentLeases.id, reference.leaseId))).limit(1));
     if (!lease || lease.heartbeatRunId !== run.id || lease.issueId !== issue.id
-      || lease.providerLeaseId !== reference.providerLeaseId || !lease.environmentId) throw changed();
+      || lease.providerLeaseId !== reference.providerLeaseId || !lease.environmentId
+      || typeof lease.metadata?.pluginId !== "string" || !lease.metadata.pluginId) throw changed();
     const [otherLease] = await db.select({ id: environmentLeases.id }).from(environmentLeases).where(and(
       ne(environmentLeases.id, lease.id), eq(environmentLeases.provider, lease.provider!), eq(environmentLeases.providerLeaseId, lease.providerLeaseId!), inArray(environmentLeases.status, ["active", "pending_cleanup"]),
     )).limit(1);
@@ -95,7 +96,8 @@ export async function retryNativeWorkspaceExport(input: {
             releasedAt: now, failureReason: "workspace_export_resume_pending", updatedAt: now,
             metadata: { ...current.lease.metadata, remoteExecutionTermination: undefined,
               [NATIVE_WORKSPACE_EXPORT_RESUME_KEY]: { schema: "paperclip.workspace-export-resume.v1", requestId,
-                companyId: input.companyId, runId: input.runId, leaseId: current.lease.id,
+              companyId: input.companyId, runId: input.runId, leaseId: current.lease.id,
+              pluginId: current.lease.metadata?.pluginId,
                 provider: current.lease.provider, providerLeaseId: current.lease.providerLeaseId, resultId: current.result.id },
               pendingCleanupAttemptId: requestId, pendingCleanupInFlight: true,
               pendingCleanupLeaseExpiresAtMs: now.getTime() + 15 * 60_000 },

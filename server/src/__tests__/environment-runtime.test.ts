@@ -5037,13 +5037,21 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     expect(await db.select().from(environmentLeases)).toHaveLength(1);
   });
 
-  it.each(["stopped", "unconfirmed", "foreign_marker", "competing_owner", "live_request", "late_receipt"])("recovers a pending export resume with stop-only cleanup after restart: %s", async outcome => {
+  it.each(["stopped", "unconfirmed", "foreign_marker", "competing_owner", "live_request", "late_receipt", "duplicate_key", "owner_stopped", "owner_driver_changed", "owner_missing"])("recovers a pending export resume with stop-only cleanup after restart: %s", async outcome => {
     const seeded = await seedReusablePluginSandboxLease("paperclip_runner");
     const lease = seeded.reusableLease;
     const requestId = randomUUID();
+    if (["duplicate_key", "owner_stopped", "owner_driver_changed", "owner_missing"].includes(outcome)) {
+      const [owner] = await db.select().from(plugins).where(eq(plugins.id, seeded.pluginId));
+      await db.insert(plugins).values({ ...owner, id: randomUUID(), pluginKey: "other.same-driver", packageName: "@other/same-driver",
+        installOrder: -1, manifestJson: { ...owner.manifestJson, id: "other.same-driver" } });
+      if (outcome === "owner_driver_changed") await db.update(plugins).set({ manifestJson: { ...owner.manifestJson, environmentDrivers: [] } }).where(eq(plugins.id, seeded.pluginId));
+      if (outcome === "owner_missing") await db.delete(plugins).where(eq(plugins.id, seeded.pluginId));
+    }
     await db.update(environmentLeases).set({ status: "pending_cleanup", cleanupStatus: "failed", metadata: {
       ...lease.metadata,
       nativeWorkspaceExportResume: { schema: "paperclip.workspace-export-resume.v1", requestId, companyId: seeded.companyId,
+        pluginId: seeded.pluginId,
         runId: outcome === "foreign_marker" ? randomUUID() : lease.heartbeatRunId, leaseId: lease.id,
         provider: lease.provider, providerLeaseId: lease.providerLeaseId, resultId: randomUUID() },
       pendingCleanupAttemptId: requestId, pendingCleanupInFlight: true,
@@ -5057,14 +5065,14 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
         cleanupStatus: null, metadata: { newOwner: true } }).where(eq(environmentLeases.id, lease.id));
       return outcome === "unconfirmed" ? undefined : { providerLeaseId: lease.providerLeaseId, state: "stopped" };
     });
-    const workerManager = { isRunning: () => true, call,
+    const workerManager = { isRunning: (id: string) => !(outcome === "owner_stopped" && id === seeded.pluginId), call,
       getWorker: () => ({ supportedMethods: ["environmentReleaseLease", "environmentDestroyLease"] }),
     } as unknown as PluginWorkerManager;
     const restarted = environmentRuntimeService(db, { pluginWorkerManager: workerManager });
     await heartbeatService(db, { environmentRuntime: restarted }).sweepPendingCleanupLeases({ backoffMs: 0 });
     expect(call.mock.calls.some((entry) => entry[1] === "environmentDestroyLease")).toBe(false);
     const persisted = (await environmentService(db).getLeaseById(lease.id))!;
-    if (outcome === "stopped") {
+    if (["stopped", "duplicate_key"].includes(outcome)) {
       expect(call).toHaveBeenCalledWith(seeded.pluginId, "environmentReleaseLease", expect.objectContaining({ providerLeaseId: lease.providerLeaseId, cancelActiveWork: true }), expect.any(Number));
       expect(persisted).toMatchObject({ status: "expired", cleanupStatus: "success", metadata: { remoteExecutionTermination: { state: "stopped", runId: lease.heartbeatRunId } } });
       expect(persisted.metadata?.nativeWorkspaceExportResume).toBeUndefined();
@@ -5073,7 +5081,10 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     } else {
       expect(persisted).toMatchObject({ status: "pending_cleanup", cleanupStatus: "failed" });
       expect(persisted.metadata?.remoteExecutionTermination).toBeUndefined();
-      if (["foreign_marker", "competing_owner", "live_request"].includes(outcome)) expect(call).not.toHaveBeenCalled();
+      if (["foreign_marker", "competing_owner", "live_request", "owner_stopped", "owner_driver_changed", "owner_missing"].includes(outcome)) expect(call).not.toHaveBeenCalled();
+      if (["owner_stopped", "owner_driver_changed", "owner_missing"].includes(outcome)) {
+        expect(persisted.metadata?.pendingCleanupAttemptId).toBe(requestId);
+      }
     }
   });
 

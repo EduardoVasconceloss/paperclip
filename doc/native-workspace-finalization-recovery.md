@@ -116,6 +116,9 @@ delay that sweep until the claim expires. Neither an unconfirmed stop nor a
 stale receipt grants admission, and a changed lease or competing sandbox owner
 prevents cleanup from taking ownership. Retry export after the lease has a new
 confirmed stopped receipt. No provider turn is created by this recovery.
+Cleanup and its readiness probe use the plugin ID recorded on that lease. Another
+plugin with the same provider name cannot take over; an unavailable original
+plugin defers cleanup without consuming an attempt.
 
 The opt-in `native-workspace-export-resume.live.test.ts` is a provider-boundary
 fault integration, separate from the browser Product E2E. After building the

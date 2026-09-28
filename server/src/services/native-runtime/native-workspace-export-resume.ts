@@ -24,6 +24,7 @@ export function readNativeWorkspaceExportResume(lease: Lease) {
     || marker.companyId !== lease.companyId || marker.runId !== lease.heartbeatRunId || !lease.heartbeatRunId
     || marker.leaseId !== lease.id || marker.provider !== lease.provider || !lease.provider
     || marker.providerLeaseId !== lease.providerLeaseId || !lease.providerLeaseId
+    || typeof marker.pluginId !== "string" || !marker.pluginId || marker.pluginId !== lease.metadata?.pluginId
     || typeof marker.requestId !== "string" || !marker.requestId
     || typeof marker.resultId !== "string" || !marker.resultId) return null;
   return marker;
@@ -51,6 +52,7 @@ export async function settleNativeWorkspaceExportResume(db: Db, lease: Lease, op
     eq(environmentLeases.providerLeaseId, lease.providerLeaseId!), eq(environmentLeases.status, "pending_cleanup"),
     sql`${environmentLeases.metadata}->>'pendingCleanupAttemptId' = ${options.attemptId}`,
     sql`${environmentLeases.metadata}->'nativeWorkspaceExportResume'->>'requestId' = ${marker.requestId}`,
+    sql`${environmentLeases.metadata}->>'pluginId' = ${marker.pluginId}`,
   )).returning();
   return row ?? null;
 }
