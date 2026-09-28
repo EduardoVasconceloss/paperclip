@@ -59,8 +59,12 @@ refs. See
 [Execution workspaces](../guides/board-operator/execution-workspaces-and-runtime-services.md#private-repositories-and-repo-only-project-workspaces).
 
 GitHub skill and company imports read `GITHUB_TOKEN` or `GH_TOKEN` from the
-**server process environment**. Without one, they call GitHub anonymously and
-share its limit of 60 requests per hour per IP.
+**server process environment**, but only for requests made by an instance
+admin, and only over HTTPS to `api.github.com` and `raw.githubusercontent.com`.
+The token can read whatever it can read on GitHub, including private repos, so
+other users and background work call GitHub anonymously and share its limit of
+60 requests per hour per IP. In `local_trusted` mode the local board is an
+instance admin.
 
 ## User-Specific Secrets
 
