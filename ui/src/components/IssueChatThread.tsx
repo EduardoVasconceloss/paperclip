@@ -4682,6 +4682,9 @@ const IssueChatComposer = forwardRef<
   const [newRecovery, setDraftRecovery] = useState<{ sourceKey: string; key: string; persisted: boolean } | null>(null);
   const draftRecovery = newRecovery?.sourceKey === sharedDraftKey ? newRecovery : restoredRecovery;
   const draftKey = draftRecovery?.key ?? sharedDraftKey;
+  // Keep the active buffer through send completion. Re-entering a task may
+  // return to its shared draft after an empty recovery has been retired.
+  useEffect(() => setDraftRecovery(restoredRecovery), [sharedDraftKey, restoredRecovery]);
   const retiredDraftKeyRef = useRef<string | undefined>(undefined);
   // Initialize before StrictMode's mount cleanup can flush an empty value over
   // the stored draft. The effect below handles subsequent task-key changes.

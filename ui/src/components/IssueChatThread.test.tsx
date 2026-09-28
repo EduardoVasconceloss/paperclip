@@ -3405,8 +3405,13 @@ describe("IssueChatThread", () => {
         </MemoryRouter>
       );
       let root = createRoot(container);
+      const storagePrototype = Object.getPrototypeOf(sessionStorage) as Storage;
+      const originalStorageWrite = storagePrototype.setItem;
       const recoveryWrite = scenario === "unavailable recovery storage"
-        ? vi.spyOn(Object.getPrototypeOf(sessionStorage), "setItem").mockImplementation(() => { throw new Error("Storage full"); })
+        ? vi.spyOn(storagePrototype, "setItem").mockImplementation(function (this: Storage, key: string, value: string) {
+          if (this === sessionStorage) throw new Error("Storage full");
+          return originalStorageWrite.call(this, key, value);
+        })
         : null;
       try {
         await act(async () => root.render(element(false)));
@@ -3473,6 +3478,31 @@ describe("IssueChatThread", () => {
       await act(async () => root.render(element(a)));
       expect(editor().value).toBe("Draft A typed just now");
       expect(loadDraft(keys[1]!)).toBe("Draft B typed just now");
+    } finally { await act(async () => root.unmount()); }
+  });
+
+  it("returns to the shared draft after finishing a recovery and leaving the task", async () => {
+    const a = "finished-recovery-a";
+    const b = "finished-recovery-b";
+    localStorage.setItem(a, "The other tab's preserved draft");
+    preserveDraftInTab(a, "My recovered message", []);
+    const onAdd = vi.fn().mockResolvedValue(undefined);
+    const root = createRoot(container);
+    const element = (draftKey: string) => (
+      <MemoryRouter><IssueChatThread comments={[]} linkedRuns={[]} timelineEvents={[]} liveRuns={[]}
+        onAdd={onAdd} draftKey={draftKey} enableLiveTranscriptPolling={false} /></MemoryRouter>
+    );
+    const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Issue chat editor"]')!;
+    try {
+      await act(async () => root.render(element(a)));
+      expect(editor().value).toBe("My recovered message");
+      await act(async () => (Array.from(container.querySelectorAll("button")).find(button => button.textContent === "Send") as HTMLButtonElement).click());
+      expect(onAdd.mock.calls[0]![0]).toBe("My recovered message");
+      expect(editor().value).toBe("");
+      await act(async () => root.render(element(b)));
+      await act(async () => root.render(element(a)));
+      expect(editor().value).toBe("The other tab's preserved draft");
+      expect(container.textContent).not.toContain("This draft is kept separately");
     } finally { await act(async () => root.unmount()); }
   });
 

@@ -51,6 +51,17 @@ export function preserveDraftInTab(draftKey: string, body: string, attachments: 
   }
 }
 
+function syncDraftRecoveryMarker(draftKey: string) {
+  const prefix = "paperclip:agent-chat-draft:recovered:";
+  if (!draftKey.startsWith(prefix)) return;
+  const marker = `${draftKey}:recovery:v1`;
+  if (loadDraft(draftKey).trim() || loadDraftAttachments(draftKey).length || loadDraftSubmission(draftKey)) {
+    sessionStorage.setItem(marker, draftKey.slice(prefix.length));
+  } else {
+    sessionStorage.removeItem(marker);
+  }
+}
+
 function mayWriteDraft(draftKey: string, attemptId?: string) {
   const pending = loadDraftSubmission(draftKey);
   return !pending || pending.attemptId === attemptId;
@@ -64,6 +75,7 @@ export function saveDraft(draftKey: string, value: string, attemptId?: string) {
     } else {
       draftStorage(draftKey).removeItem(draftKey);
     }
+    syncDraftRecoveryMarker(draftKey);
   } catch {
     // Ignore browser storage failures.
   }
@@ -75,6 +87,7 @@ export function clearDraft(draftKey: string, attemptId?: string) {
     draftStorage(draftKey).removeItem(draftKey);
     draftStorage(draftKey).removeItem(`${draftKey}:attachments:v1`);
     draftStorage(draftKey).removeItem(`${draftKey}:submission:v1`);
+    syncDraftRecoveryMarker(draftKey);
   } catch {
     // Ignore browser storage failures.
   }
@@ -127,6 +140,7 @@ export function saveDraftSubmission(
       `${draftKey}:submission:v1`,
       JSON.stringify({ version: 1, draftKey, ...submission }),
     );
+    syncDraftRecoveryMarker(draftKey);
   } catch {
     /* The composer also retains the fence in memory. */
   }
@@ -134,8 +148,10 @@ export function saveDraftSubmission(
 
 export function clearDraftSubmission(draftKey: string, attemptId: string) {
   try {
-    if (loadDraftSubmission(draftKey)?.attemptId === attemptId)
+    if (loadDraftSubmission(draftKey)?.attemptId === attemptId) {
       draftStorage(draftKey).removeItem(`${draftKey}:submission:v1`);
+      syncDraftRecoveryMarker(draftKey);
+    }
   } catch {
     /* Disabled browser storage is supported in memory. */
   }
@@ -238,6 +254,7 @@ export function saveDraftAttachments(draftKey: string, attachments: unknown, att
         JSON.stringify({ version: 1, draftKey, attachments: selected }),
       );
     else draftStorage(draftKey).removeItem(`${draftKey}:attachments:v1`);
+    syncDraftRecoveryMarker(draftKey);
   } catch {
     /* Disabled/full browser storage must not break the composer. */
   }

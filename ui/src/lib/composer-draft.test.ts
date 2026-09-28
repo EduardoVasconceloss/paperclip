@@ -45,6 +45,28 @@ describe("task draft upload receipts", () => {
     expect(loadDraftSubmission(key)?.attemptId).toBe(id);
   });
 
+  it("retires a finished recovery but keeps or restores its mapping for unsent work", () => {
+    sessionStorage.clear();
+    saveDraft(key, "Shared draft stays available");
+    const fork = preserveDraftInTab(key, "Recovered message", []);
+    saveDraftSubmission(fork.key, { attemptId: id, reviewed: false });
+    expect(settleDraftSubmission(fork.key, id)).toBe(true);
+    expect(loadDraftRecoveryKey(key)).toBeNull();
+    expect(loadDraft(key)).toBe("Shared draft stays available");
+
+    saveDraft(fork.key, "Next recovered draft");
+    expect(loadDraftRecoveryKey(key)).toBe(fork.key);
+    saveDraftSubmission(fork.key, { attemptId: id, reviewed: false, nextDraftOffset: 0, submittedAttachmentIds: [] });
+    expect(settleDraftSubmission(fork.key, id)).toBe(true);
+    expect(loadDraftRecoveryKey(key)).toBe(fork.key);
+    expect(loadDraft(fork.key)).toBe("Next recovered draft");
+    clearDraft(fork.key);
+    expect(loadDraftRecoveryKey(key)).toBeNull();
+    saveDraftAttachments(fork.key, [receipt]);
+    expect(loadDraftRecoveryKey(key)).toBe(fork.key);
+    expect(loadDraftAttachments(fork.key)).toEqual([receipt]);
+  });
+
   it("settles only submitted text and attachments while preserving the next draft", () => {
     const nextId = "aaf8228f-0be7-45ae-a104-6fbe0af6f1d3";
     const nextReceipt = { ...receipt, attachmentId: nextId, contentPath: `/api/attachments/${nextId}/content` };
