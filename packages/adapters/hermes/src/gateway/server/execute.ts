@@ -620,7 +620,11 @@ function parseUsage(value: unknown): UsageSummary | undefined {
   const source = asRecord(record.usage) ?? record;
   const inputTokens = asNumber(source.input_tokens ?? source.inputTokens ?? source.input, 0);
   const outputTokens = asNumber(source.output_tokens ?? source.outputTokens ?? source.output, 0);
-  const cachedInputTokens = asNumber(source.cached_input_tokens ?? source.cachedInputTokens, 0);
+  // Hermes' /v1/runs terminal usage names cache reads cache_read_tokens.
+  const cachedInputTokens = asNumber(
+    source.cached_input_tokens ?? source.cachedInputTokens ?? source.cache_read_tokens,
+    0,
+  );
   if (inputTokens <= 0 && outputTokens <= 0 && cachedInputTokens <= 0) return undefined;
   return {
     inputTokens,
