@@ -93,7 +93,8 @@ export function ComposerRunSettingsPicker({
   const effortLabel = effort ? EFFORT_LABELS[effort] ?? effort : "Default";
   const fastAvailable = composerFastAvailable(agent, model);
   const changed = Boolean(selected.model || selected.effort || selected.fast);
-  const filteredAgents = options.filter((item) =>
+  const assigneeOptions = [{ id: "", label: "No assignee", searchText: "Unassigned" }, ...options.filter((item) => item.id !== "")];
+  const filteredAgents = assigneeOptions.filter((item) =>
     `${item.label} ${item.searchText ?? ""}`.toLowerCase().includes(assigneeSearch.trim().toLowerCase()));
   const query = modelSearch.trim();
   const filteredModels = models.filter((item) =>
@@ -111,8 +112,10 @@ export function ComposerRunSettingsPicker({
   }, [agentId]);
 
   const chooseAssignee = (value: string) => {
-    onAssigneeChange(value);
-    onSettingsChange(DEFAULT_COMPOSER_RUN_SETTINGS);
+    if (value !== assigneeValue) {
+      onAssigneeChange(value);
+      onSettingsChange(DEFAULT_COMPOSER_RUN_SETTINGS);
+    }
     setView("settings");
     setAssigneeSearch("");
   };
@@ -126,7 +129,7 @@ export function ComposerRunSettingsPicker({
   const trigger = <button ref={triggerRef} type="button" disabled={disabled} aria-label="Select assignee, model and effort" data-testid="task-chat-composer-assignee"
     className="flex h-8 min-w-0 max-w-64 items-center gap-1.5 rounded-full px-2.5 text-xs font-medium hover:bg-accent focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring disabled:opacity-50">
     {renderAssigneeIdentity?.(assigneeValue, agent?.name ?? "Unassigned", "trigger")}
-    <span className="max-w-24 truncate">{options.find((item) => item.id === assigneeValue)?.label ?? "Unassigned"}</span>
+    <span className="max-w-24 truncate">{assigneeOptions.find((item) => item.id === assigneeValue)?.label ?? "Unassigned"}</span>
     {modelSupported ? <><span className="text-muted-foreground" aria-hidden>·</span><span className="min-w-0 truncate text-muted-foreground">{modelName || "Harness default"}</span></> : null}
     {effort ? <span className="hidden shrink-0 text-muted-foreground sm:inline">{effortLabel}</span> : null}
     <ChevronDown className="size-3 shrink-0 text-muted-foreground" aria-hidden />

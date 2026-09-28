@@ -357,6 +357,7 @@ function shouldImplicitlyReopenComment(
 }
 
 function parseAssigneeValue(value: string): CommentReassignment | undefined {
+  if (!value) return { assigneeAgentId: null, assigneeUserId: null };
   if (value.startsWith("agent:")) {
     const id = value.slice("agent:".length);
     return id ? { assigneeAgentId: id, assigneeUserId: null } : undefined;
@@ -903,7 +904,7 @@ export function TaskChatComposer({
           showAssignee && assigneeValue !== currentAssigneeValue;
         if (hasReassignment && goalCommand.command.action !== "focus") {
           const reassignment = parseAssigneeValue(assigneeValue);
-          if (!reassignment || !onRunnerGoalReassign) {
+          if (!reassignment?.assigneeAgentId || !onRunnerGoalReassign) {
             setActionError("Select an agent before starting a session goal.");
             return;
           }
