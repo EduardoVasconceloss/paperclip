@@ -67,15 +67,76 @@ async function fakeTar(script: string) {
   const directory = await temporaryDirectory();
   const pidFile = path.join(directory, "pid");
   await fs.writeFile(path.join(directory, "tar"), `#!${process.execPath}\n` +
-    `require("node:fs").writeFileSync(${JSON.stringify(pidFile)}, String(process.pid));\n${script}\n`, { mode: 0o755 });
+    `require("node:fs").appendFileSync(${JSON.stringify(pidFile)}, String(process.pid) + "\\n");\n${script}\n`, { mode: 0o755 });
   vi.stubEnv("PATH", `${directory}${path.delimiter}${process.env.PATH}`);
   return async () => {
-    const pid = Number(await fs.readFile(pidFile, "utf8"));
-    expect(() => process.kill(pid, 0)).toThrow();
+    const pids = (await fs.readFile(pidFile, "utf8")).trim().split("\n").map(Number);
+    for (const pid of pids) expect(() => process.kill(pid, 0)).toThrow();
   };
 }
 
 const safeLine = "-rw-r--r-- 0/0 0 2026-09-27 12:00 nested/café.txt";
+
+// The child streams batches with pipe backpressure; quota tests do not allocate
+// a complete oversized listing in either the parent or the child.
+function listingWriter(line: string, count: number, tail = "") {
+  return `
+    const { once } = require("node:events");
+    const line = Buffer.from(${JSON.stringify(line)});
+    (async () => {
+      let left = ${count};
+      while (left > 0) {
+        const size = Math.min(left, Math.max(1, Math.floor(65536 / line.length)));
+        const batch = Buffer.concat(Array.from({ length: size }, () => line));
+        if (!process.stdout.write(batch)) await once(process.stdout, "drain");
+        left -= size;
+      }
+      process.stdout.write(${JSON.stringify(tail)});
+    })();
+  `;
+}
+
+it.each([false, true])("bounds aggregate listing bytes at 64 MiB (over quota: %s)", async (overQuota) => {
+  const line = "-rw-r--r-- 0/0 0 2026-09-27 12:00 ".padEnd(4095, "x") + "\n";
+  const count = 64 * 1024 * 1024 / Buffer.byteLength(line) + Number(overQuota);
+  const checkReaped = await fakeTar(listingWriter(line, count));
+  const result = assertTarballEntriesConfined("unused.tar");
+  if (overQuota) await expect(result).rejects.toThrow("total listing byte limit");
+  else await expect(result).resolves.toBeUndefined();
+  await checkReaped();
+}, 30_000);
+
+it.each([false, true])("bounds aggregate listing entries at 250,000 (over quota: %s)", async (overQuota) => {
+  // The over-quota member has no newline: EOF must pass the same admission gate.
+  const checkReaped = await fakeTar(listingWriter(safeLine + "\n", 250_000, overQuota ? safeLine : ""));
+  const result = assertTarballEntriesConfined("unused.tar");
+  if (overQuota) await expect(result).rejects.toThrow("listing entry limit");
+  else await expect(result).resolves.toBeUndefined();
+  await checkReaped();
+}, 30_000);
+
+it("counts blank lines against the aggregate parsing quota", async () => {
+  const checkReaped = await fakeTar(listingWriter("\n", 250_001));
+  await expect(assertTarballEntriesConfined("unused.tar")).rejects.toThrow("listing entry limit");
+  await checkReaped();
+});
+
+it("enforces quotas independently on repeated and concurrent listings and reaps every child", async () => {
+  const checkReaped = await fakeTar(`
+    if (process.argv[3] === "small.tar") process.stdout.write(${JSON.stringify(safeLine + "\n")});
+    else { ${listingWriter(safeLine + "\n", 250_001)} }
+  `);
+  const results = await Promise.allSettled([
+    assertTarballEntriesConfined("large-a.tar"),
+    assertTarballEntriesConfined("small.tar"),
+    assertTarballEntriesConfined("large-b.tar"),
+  ]);
+  expect(results[0]).toMatchObject({ status: "rejected", reason: expect.objectContaining({ message: expect.stringContaining("listing entry limit") }) });
+  expect(results[1]).toMatchObject({ status: "fulfilled" });
+  expect(results[2]).toMatchObject({ status: "rejected", reason: expect.objectContaining({ message: expect.stringContaining("listing entry limit") }) });
+  await expect(assertTarballEntriesConfined("large-again.tar")).rejects.toThrow("listing entry limit");
+  await checkReaped();
+}, 30_000);
 it("preserves UTF-8 split across chunks and checks a final line without a newline", async () => {
   const checkReaped = await fakeTar(`
     const bytes = Buffer.from(${JSON.stringify(safeLine)});

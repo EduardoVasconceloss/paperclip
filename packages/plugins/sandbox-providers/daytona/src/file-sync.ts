@@ -286,16 +286,23 @@ function assertTarListingLineConfined(line: string): void {
 
 const TAR_LISTING_MAX_LINE_BYTES = 64 * 1024;
 const TAR_LISTING_MAX_STDERR_BYTES = 64 * 1024;
+// Full workspace exports are larger than provider checkpoints. These quotas
+// admit the supported 60k-file / 39.8 MB-name export and 145k-entry regression,
+// while bounding work on untrusted metadata independently of the wall deadline.
+// The byte quota matches the native workspace descriptor's 64 MiB ceiling;
+// it is an admission counter, never a buffer allocation.
+const TAR_LISTING_MAX_TOTAL_BYTES = 64 * 1024 * 1024;
+const TAR_LISTING_MAX_ENTRIES = 250_000;
 const TAR_LISTING_TIMEOUT_MS = 120_000;
 
 export async function assertTarballEntriesConfined(
   archivePath: string,
   timeoutMs = TAR_LISTING_TIMEOUT_MS,
 ): Promise<void> {
-  // Total metadata is unbounded: a valid large workspace can exceed execFile's
-  // buffer. Bound each entry and diagnostic instead, and inspect every entry
-  // before extraction starts. Keep bytes until a full line to preserve UTF-8
-  // characters split across pipe chunks.
+  // A valid large workspace can exceed execFile's buffer. Stream within both
+  // aggregate admission quotas and per-entry/diagnostic memory bounds, checking
+  // every entry before extraction. Keep bytes until a full line to preserve
+  // UTF-8 characters split across pipe chunks.
   const child = spawn("tar", ["-tvf", archivePath], {
     env: { ...process.env, COPYFILE_DISABLE: "1" },
     stdio: ["ignore", "pipe", "pipe"],
@@ -304,6 +311,15 @@ export async function assertTarballEntriesConfined(
   let failure: Error | undefined;
   let stderr = Buffer.alloc(0);
   let pending: Buffer = Buffer.alloc(0);
+  let totalBytes = 0;
+  let entries = 0;
+  const validateLine = (line: Buffer) => {
+    // Count empty lines too, so whitespace cannot evade the parsing-work quota.
+    if (++entries > TAR_LISTING_MAX_ENTRIES) {
+      throw new Error("Daytona syncOut tar listing entry limit exceeded (250000)");
+    }
+    assertTarListingLineConfined(line.toString("utf8"));
+  };
   const closed = new Promise<{ code: number | null; signal: NodeJS.Signals | null }>((resolve) => {
     child.once("error", (error) => { spawnError = error; });
     child.once("close", (code, signal) => resolve({ code, signal }));
@@ -326,6 +342,10 @@ export async function assertTarballEntriesConfined(
     for await (const chunk of child.stdout) {
       if (failure) break;
       const bytes = chunk as Buffer;
+      totalBytes += bytes.length;
+      if (totalBytes > TAR_LISTING_MAX_TOTAL_BYTES) {
+        throw new Error("Daytona syncOut tar total listing byte limit exceeded (64 MiB)");
+      }
       let start = 0;
       while (start < bytes.length) {
         const newline = bytes.indexOf(10, start);
@@ -335,12 +355,12 @@ export async function assertTarballEntriesConfined(
         }
         pending = Buffer.concat([pending, bytes.subarray(start, end)]);
         if (newline < 0) break;
-        assertTarListingLineConfined(pending.toString("utf8"));
+        validateLine(pending);
         pending = Buffer.alloc(0);
         start = newline + 1;
       }
     }
-    if (!failure && pending.length > 0) assertTarListingLineConfined(pending.toString("utf8"));
+    if (!failure && pending.length > 0) validateLine(pending);
     const result = await closed;
     if (failure) throw failure;
     if (spawnError) throw spawnError;
