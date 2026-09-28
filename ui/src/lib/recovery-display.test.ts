@@ -171,6 +171,13 @@ describe("deriveRecoveryDisplayState", () => {
       },
     );
 
+    it.each(["active", "escalated"] as const)("shows a board-admitted export as progress despite prior %s repair ownership", (status) => {
+      expect(deriveRecoveryDisplayState({
+        ...action, status, ownerType: "board", attemptCount: 3,
+        nativeRunActivity: { runId: "finalizing-run", status: "running", workspaceOperationId: "export-operation" },
+      }, { now })).toBe("in_progress");
+    });
+
     it("keeps exhausted retries and board-owned failures actionable", () => {
       const wakePolicy = { ...action.wakePolicy, notBefore: "2026-09-27T02:01:00.000Z" };
       expect(deriveRecoveryDisplayState({ ...action, wakePolicy, attemptCount: 3 }, { now })).toBe("needed");

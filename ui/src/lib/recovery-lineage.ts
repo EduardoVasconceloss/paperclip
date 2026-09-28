@@ -198,7 +198,8 @@ export function readRecoveryRetryLineage(
     sourceAttempt: nativeResume ? null : lane === "source_owner" ? attempt : evidenceSourceAttempt,
     sourceMaxAttempts: nativeResume ? null : lane === "source_owner" ? maxAttempts : evidenceSourceMaxAttempts,
     hasDurablePath:
-      !exhausted && (liveRunId !== null || (nextRetryAt !== null && !retryExpired)),
+      (nativeResume && liveRunId !== null) ||
+      (!exhausted && (liveRunId !== null || (nextRetryAt !== null && !retryExpired))),
   };
 }
 

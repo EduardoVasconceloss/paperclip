@@ -71,7 +71,6 @@ export function deriveRecoveryDisplayState(
   context?: RecoveryLivenessContext,
 ): RecoveryDisplayState {
   if (action.status === "resolved") return "resolved";
-  if (action.status === "escalated") return "escalated";
   if (action.status === "cancelled") return "resolved";
   // A bounded retry lineage still holding a durable path is work the server will do on its
   // own. Shouting "recovery needed" over it would ask a human to fix something nobody has to
@@ -86,6 +85,11 @@ export function deriveRecoveryDisplayState(
     timeoutAt: action.timeoutAt,
     nativeRunActivity: action.nativeRunActivity,
   }, context);
+  // An explicit board retry may retain its old owner/budget while the exact
+  // native run is already making progress. Actual activity wins over that
+  // historical repair state, but a merely scheduled board retry does not.
+  if (lineage?.lane === "native_run" && lineage.liveRunId) return "in_progress";
+  if (action.status === "escalated") return "escalated";
   if (action.kind === "active_run_watchdog") {
     // Native finalization shares the watchdog kind, but resumes a failed
     // coordinator rather than observing a live agent turn. Preserve board

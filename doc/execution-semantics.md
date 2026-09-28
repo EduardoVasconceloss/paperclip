@@ -1476,4 +1476,7 @@ not require or synthesize a legacy `scheduledRetryReason`.
 The card describes recovery of the existing run. It does not describe a fresh
 owner disposition turn. This also covers native bootstrap/session recovery,
 which shares the same resume policy. Inbox rows, source cards, and blocker chips
-use the same activity projection and keep board-owned repairs actionable.
+use the same activity projection. Board-owned repairs stay actionable until a
+verified native retry actually starts. Once an explicit board retry is running,
+its live activity takes precedence over the prior owner and exhausted budget.
+Resolved and cancelled actions remain resolved.

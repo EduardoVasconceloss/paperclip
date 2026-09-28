@@ -904,8 +904,8 @@ function formatTimeAbsolute(value: string | Date | null | undefined): string | n
  */
 function lineageHeadline(lineage: RecoveryRetryLineage): string {
   if (lineage.lane === "native_run") {
-    if (lineage.exhausted) return "Paperclip could not recover the existing run within its retry budget. Review the recorded failure before retrying. The task stays with its original owner.";
     if (lineage.liveRunId) return "Paperclip is recovering the existing run. The task stays with its original owner.";
+    if (lineage.exhausted) return "Paperclip could not recover the existing run within its retry budget. Review the recorded failure before retrying. The task stays with its original owner.";
     if (lineage.retryExpired) return "The retry for the existing run came due and did not start. Review the recorded failure and retry when ready. The task stays with its original owner.";
     if (lineage.nextRetryAt) return "Paperclip has scheduled another attempt to resume the existing run. The task stays with its original owner.";
     return "The existing run still needs recovery. Review the recorded failure before retrying. The task stays with its original owner.";
@@ -1028,7 +1028,7 @@ export function IssueRecoveryActionCard({
   // the budget ran out or the scheduled attempt simply never fired.
   const wakeSummary = lineage?.retryExpired
     ? "The scheduled retry did not run — a retry or a decision is needed"
-    : lineage?.exhausted && lineage.lane !== "board"
+    : lineage?.exhausted && !lineage.liveRunId && lineage.lane !== "board"
     ? "Automatic retries are finished — a decision is needed"
     : readWakePolicySummary(action);
   const evidenceSummary = pickEvidenceSummary(action);
@@ -1184,7 +1184,7 @@ export function IssueRecoveryActionCard({
                 className="inline-flex flex-wrap items-center gap-1.5"
                 data-testid="recovery-recovery-owner"
               >
-                {lineage.lane === "native_run" && action.ownerType !== "board" ? (
+                {lineage.lane === "native_run" && (action.ownerType !== "board" || Boolean(lineage.liveRunId)) ? (
                   <>
                     <span className="font-medium">Paperclip</span>
                     <span className="text-muted-foreground">recovers the existing run</span>
