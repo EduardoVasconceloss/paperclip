@@ -5037,11 +5037,11 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     expect(await db.select().from(environmentLeases)).toHaveLength(1);
   });
 
-  it.each(["stopped", "unconfirmed", "foreign_marker", "competing_owner", "live_request", "late_receipt", "duplicate_key", "owner_stopped", "owner_driver_changed", "owner_missing"])("recovers a pending export resume with stop-only cleanup after restart: %s", async outcome => {
+  it.each(["stopped", "unconfirmed", "foreign_marker", "competing_owner", "live_request", "late_receipt", "duplicate_key", "owner_stopped", "owner_driver_changed", "owner_missing", "legacy_intent", "foreign_plugin_pin", "v2_missing_pin"])("recovers a pending export resume with stop-only cleanup after restart: %s", async outcome => {
     const seeded = await seedReusablePluginSandboxLease("paperclip_runner");
     const lease = seeded.reusableLease;
     const requestId = randomUUID();
-    if (["duplicate_key", "owner_stopped", "owner_driver_changed", "owner_missing"].includes(outcome)) {
+    if (["duplicate_key", "owner_stopped", "owner_driver_changed", "owner_missing", "legacy_intent"].includes(outcome)) {
       const [owner] = await db.select().from(plugins).where(eq(plugins.id, seeded.pluginId));
       await db.insert(plugins).values({ ...owner, id: randomUUID(), pluginKey: "other.same-driver", packageName: "@other/same-driver",
         installOrder: -1, manifestJson: { ...owner.manifestJson, id: "other.same-driver" } });
@@ -5050,8 +5050,8 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     }
     await db.update(environmentLeases).set({ status: "pending_cleanup", cleanupStatus: "failed", metadata: {
       ...lease.metadata,
-      nativeWorkspaceExportResume: { schema: "paperclip.workspace-export-resume.v1", requestId, companyId: seeded.companyId,
-        pluginId: seeded.pluginId,
+      nativeWorkspaceExportResume: { schema: outcome === "v2_missing_pin" ? "paperclip.workspace-export-resume.v2" : "paperclip.workspace-export-resume.v1", requestId, companyId: seeded.companyId,
+        ...(["legacy_intent", "v2_missing_pin"].includes(outcome) ? {} : { pluginId: outcome === "foreign_plugin_pin" ? randomUUID() : seeded.pluginId }),
         runId: outcome === "foreign_marker" ? randomUUID() : lease.heartbeatRunId, leaseId: lease.id,
         provider: lease.provider, providerLeaseId: lease.providerLeaseId, resultId: randomUUID() },
       pendingCleanupAttemptId: requestId, pendingCleanupInFlight: true,
@@ -5072,7 +5072,7 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     await heartbeatService(db, { environmentRuntime: restarted }).sweepPendingCleanupLeases({ backoffMs: 0 });
     expect(call.mock.calls.some((entry) => entry[1] === "environmentDestroyLease")).toBe(false);
     const persisted = (await environmentService(db).getLeaseById(lease.id))!;
-    if (["stopped", "duplicate_key"].includes(outcome)) {
+    if (["stopped", "duplicate_key", "legacy_intent"].includes(outcome)) {
       expect(call).toHaveBeenCalledWith(seeded.pluginId, "environmentReleaseLease", expect.objectContaining({ providerLeaseId: lease.providerLeaseId, cancelActiveWork: true }), expect.any(Number));
       expect(persisted).toMatchObject({ status: "expired", cleanupStatus: "success", metadata: { remoteExecutionTermination: { state: "stopped", runId: lease.heartbeatRunId } } });
       expect(persisted.metadata?.nativeWorkspaceExportResume).toBeUndefined();
@@ -5081,7 +5081,7 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     } else {
       expect(persisted).toMatchObject({ status: "pending_cleanup", cleanupStatus: "failed" });
       expect(persisted.metadata?.remoteExecutionTermination).toBeUndefined();
-      if (["foreign_marker", "competing_owner", "live_request", "owner_stopped", "owner_driver_changed", "owner_missing"].includes(outcome)) expect(call).not.toHaveBeenCalled();
+      if (["foreign_marker", "foreign_plugin_pin", "v2_missing_pin", "competing_owner", "live_request", "owner_stopped", "owner_driver_changed", "owner_missing"].includes(outcome)) expect(call).not.toHaveBeenCalled();
       if (["owner_stopped", "owner_driver_changed", "owner_missing"].includes(outcome)) {
         expect(persisted.metadata?.pendingCleanupAttemptId).toBe(requestId);
       }

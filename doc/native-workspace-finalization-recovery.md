@@ -119,6 +119,9 @@ confirmed stopped receipt. No provider turn is created by this recovery.
 Cleanup and its readiness probe use the plugin ID recorded on that lease. Another
 plugin with the same provider name cannot take over; an unavailable original
 plugin defers cleanup without consuming an attempt.
+New intents use schema v2 with an explicit plugin pin. A v1 intent created before
+that field existed remains recoverable using only the plugin ID already recorded
+on its exact lease; an explicit mismatched pin is still rejected.
 
 The opt-in `native-workspace-export-resume.live.test.ts` is a provider-boundary
 fault integration, separate from the browser Product E2E. After building the

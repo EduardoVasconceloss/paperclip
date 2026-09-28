@@ -20,14 +20,19 @@ export function readNativeWorkspaceExportResume(lease: Lease) {
   const value = lease.metadata?.[NATIVE_WORKSPACE_EXPORT_RESUME_KEY];
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const marker = value as Record<string, unknown>;
-  if (marker.schema !== "paperclip.workspace-export-resume.v1"
+  if (!["paperclip.workspace-export-resume.v1", "paperclip.workspace-export-resume.v2"].includes(String(marker.schema))
     || marker.companyId !== lease.companyId || marker.runId !== lease.heartbeatRunId || !lease.heartbeatRunId
     || marker.leaseId !== lease.id || marker.provider !== lease.provider || !lease.provider
     || marker.providerLeaseId !== lease.providerLeaseId || !lease.providerLeaseId
-    || typeof marker.pluginId !== "string" || !marker.pluginId || marker.pluginId !== lease.metadata?.pluginId
     || typeof marker.requestId !== "string" || !marker.requestId
     || typeof marker.resultId !== "string" || !marker.resultId) return null;
-  return marker;
+  // v1 preceded the intent's explicit plugin pin. Its exact lease already
+  // recorded the acquiring plugin; never reconstruct that owner from a driver
+  // name, and never override an explicit (even invalid) intent pin.
+  const pluginId = marker.schema === "paperclip.workspace-export-resume.v1" && marker.pluginId === undefined
+    ? lease.metadata?.pluginId : marker.pluginId;
+  if (typeof pluginId !== "string" || !pluginId || pluginId !== lease.metadata?.pluginId) return null;
+  return { ...marker, requestId: marker.requestId, resultId: marker.resultId, pluginId };
 }
 
 /** A late cleanup receipt cannot rewrite a rebound lease or a newer attempt. */

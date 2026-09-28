@@ -2583,7 +2583,8 @@ function createSandboxEnvironmentDriver(
         )).limit(1);
         if (!current || current.status !== "pending_cleanup" || current.companyId !== input.lease.companyId
           || current.metadata?.pendingCleanupAttemptId !== input.lease.metadata?.pendingCleanupAttemptId
-          || readNativeWorkspaceExportResume(current)?.requestId !== resumeIntent.requestId || otherOwner) {
+          || readNativeWorkspaceExportResume(current)?.requestId !== resumeIntent.requestId
+          || readNativeWorkspaceExportResume(current)?.pluginId !== resumeIntent.pluginId || otherOwner) {
           throw new Error("Workspace export resume ownership changed before cleanup.");
         }
       };
