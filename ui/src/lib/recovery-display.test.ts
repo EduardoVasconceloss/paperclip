@@ -134,7 +134,7 @@ describe("deriveRecoveryDisplayState", () => {
       },
     };
 
-    it("shows the missed PAP-64 finalization retry as recovery needed", () => {
+    it("shows a missed native finalization retry as recovery needed", () => {
       const state = deriveRecoveryDisplayState(action, { now });
       expect(state).toBe("needed");
       expect(recoveryChipLabel(state as "needed", action.kind)).toBe("Recovery needed");
