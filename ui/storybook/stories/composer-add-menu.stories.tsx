@@ -152,3 +152,12 @@ export const Mobile: Story = {
     await expect(page.getByRole("menuitem", { name: /Plan mode/ })).toBeVisible();
   },
 };
+
+export const GoalDraft: Story = {
+  name: "08 · Start a supported goal",
+  play: async ({ canvasElement }) => {
+    const page = await openAdd(canvasElement);
+    await userEvent.click(page.getByRole("menuitem", { name: /Goal/ }));
+    await expect(page.getByRole("textbox", { name: "editable markdown" })).toHaveTextContent("/goal");
+  },
+};
