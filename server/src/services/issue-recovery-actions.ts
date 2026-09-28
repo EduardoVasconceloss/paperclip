@@ -10,6 +10,8 @@ import type {
   IssueRecoveryActionStatus,
 } from "@paperclipai/shared";
 
+import { isNativeWorkspaceFinalizationOperationActive } from "./workspace-operations.js";
+
 const ACTIVE_RECOVERY_ACTION_STATUSES = ["active", "escalated"] as const satisfies readonly IssueRecoveryActionStatus[];
 const MAX_UPSERT_RETRIES = 3;
 
@@ -169,6 +171,7 @@ export function issueRecoveryActionService(db: Db) {
       runId: heartbeatRuns.id,
       issueId: heartbeatRuns.nativeIssueId,
       status: heartbeatRuns.status,
+      finishedAt: heartbeatRuns.finishedAt,
       workspaceOperationId: workspaceOperations.id,
     }).from(heartbeatRuns).leftJoin(workspaceOperations, and(
       eq(workspaceOperations.companyId, heartbeatRuns.companyId),
@@ -189,7 +192,16 @@ export function issueRecoveryActionService(db: Db) {
     )).orderBy(desc(workspaceOperations.startedAt));
     const activityByRun = new Map<string, (typeof activity)[number]>();
     for (const row of activity) {
-      if (!activityByRun.has(row.runId)) activityByRun.set(row.runId, row);
+      const liveOperation = row.workspaceOperationId && row.issueId
+        && isNativeWorkspaceFinalizationOperationActive({
+          operationId: row.workspaceOperationId, companyId, runId: row.runId, issueId: row.issueId,
+        });
+      const liveHeartbeat = ["queued", "running"].includes(row.status) && row.finishedAt === null;
+      if (!liveHeartbeat && !liveOperation) continue;
+      const projected = { ...row, workspaceOperationId: liveOperation ? row.workspaceOperationId : null };
+      if (!activityByRun.has(row.runId) || (!activityByRun.get(row.runId)?.workspaceOperationId && liveOperation)) {
+        activityByRun.set(row.runId, projected);
+      }
     }
     for (const action of nativeActions) {
       const row = activityByRun.get(String(action.wakePolicy?.runId).toLowerCase());

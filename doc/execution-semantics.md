@@ -1468,7 +1468,11 @@ recovery needed rather than “Observing active run.”
 Native recovery reads include a read-only `nativeRunActivity` projection, bound
 to the company, source issue, and exact `resume_native_run.runId`. It reports a
 queued/running native heartbeat, or a running `workspace_finalize` operation
-owned by `native_workspace_finalizer`. The latter remains authoritative while
+owned by `native_workspace_finalizer` whose actual callback is still executing
+in this server process. A persisted running row alone is not activity evidence: a
+crash may leave it behind. The in-process claim ends when the callback joins and
+is empty after restart, with no expiry that can misclassify a slow export. This
+read-only presentation check never grants takeover authority. It remains authoritative while
 the original heartbeat still records its previous failure. Completed operations,
 unrelated runs, and other companies do not establish activity. These retries do
 not require or synthesize a legacy `scheduledRetryReason`.
