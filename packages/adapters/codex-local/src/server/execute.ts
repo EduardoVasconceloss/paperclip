@@ -1000,10 +1000,19 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
             filesystemScope,
             managedPaths: [
               { path: effectiveCodexHome, access: "rw" },
-              // CODEX_HOME/skills links each skill to its source; mount the sources so the links resolve.
-              ...codexSkillEntries
-                .filter((entry) => desiredSkillNames.includes(entry.key))
-                .map((entry) => ({ path: entry.source, access: "ro" as const })),
+              // Mount what each CODEX_HOME/skills link resolves to: injection keeps a live operator link
+              // whose target differs from the Paperclip source.
+              ...(await Promise.all(
+                codexSkillEntries
+                  .filter((entry) => desiredSkillNames.includes(entry.key))
+                  .map(async (entry) => {
+                    const linkedPath = await fs.readlink(path.join(codexSkillsDir, entry.runtimeName)).catch(() => null);
+                    return {
+                      path: linkedPath ? path.resolve(codexSkillsDir, linkedPath) : entry.source,
+                      access: "ro" as const,
+                    };
+                  }),
+              )),
             ],
             extraPaths: parseLocalProcessSandboxExtraPaths(config.filesystemExtraPaths),
             pathAliases: targetWorkspaceRealization?.mode === "copy"
