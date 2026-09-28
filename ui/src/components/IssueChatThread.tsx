@@ -2,6 +2,7 @@ import { DispositionRecoveryNotice, useDispositionRecoverySnapshot } from "./Dis
 import { AgentAvatar } from "@/components/AgentAvatar";
 import type { ComposerRunSettings } from "./task-chat/composer-run-settings";
 import { ComposerRunSettingsPicker } from "./task-chat/ComposerRunSettingsPicker";
+import { ComposerAddMenu, ComposerModeChip } from "./task-chat/ComposerAddMenu";
 import { TaskChatPausedTakeover, type TaskComposerPause } from "./task-chat/TaskChatPausedTakeover";
 import { useEmailComment } from "./EmailMessageCard";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
@@ -213,9 +214,7 @@ import { cn, formatDateTime, formatShortDate } from "../lib/utils";
 import { liveBlueBadge } from "../lib/status-colors";
 import {
   nextWorkMode,
-  titleForPendingWorkMode,
   workModeMetaFor,
-  workModeMetaList,
 } from "../lib/work-mode-meta";
 import {
   Tooltip,
@@ -4775,7 +4774,6 @@ const IssueChatComposer = forwardRef<
   const [pendingWorkMode, setPendingWorkMode] = useState<IssueWorkMode>(
     resolvedIssueWorkMode,
   );
-  const [workModeMenuOpen, setWorkModeMenuOpen] = useState(false);
   const canToggleWorkMode = typeof onWorkModeChange === "function";
   const attachInputRef = useRef<HTMLInputElement | null>(null);
   const reassignTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -5309,9 +5307,7 @@ const IssueChatComposer = forwardRef<
     );
   }
 
-  const workModeOptions = workModeMetaList();
   const pendingWorkModeMeta = workModeMetaFor(pendingWorkMode);
-  const PendingWorkModeIcon = pendingWorkModeMeta.icon;
 
   function handleComposerKeyDown(evt: ReactKeyboardEvent<HTMLDivElement>) {
     // Match the period via both `code` and `key`: iOS Safari with a hardware
@@ -5545,86 +5541,17 @@ const IssueChatComposer = forwardRef<
       <div className="flex flex-wrap items-center justify-end gap-3">
         <div className="mr-auto flex items-center gap-2">
           {canAcceptFiles ? (
-            <>
-              <input
-                ref={attachInputRef}
-                type="file"
-                className="hidden"
-                onChange={handleAttachFile}
-              />
-              <Button
-                variant="ghost"
-                size="icon-sm"
-                onClick={() => attachInputRef.current?.click()}
-                disabled={attaching}
-                title="Attach file"
-              >
-                <Paperclip className="h-4 w-4" />
-              </Button>
-            </>
+            <input ref={attachInputRef} type="file" className="hidden" onChange={handleAttachFile} />
           ) : null}
-          {canToggleWorkMode ? (
-            <Popover open={workModeMenuOpen} onOpenChange={setWorkModeMenuOpen}>
-              <PopoverTrigger asChild>
-                {/* Single persistent mode chip (PAP-95b mockup rev 5): yellow in
-                    planning, neutral in standard, caret opens the switch menu. */}
-                <button
-                  type="button"
-                  data-testid="issue-chat-composer-work-mode-toggle"
-                  data-pending-work-mode={pendingWorkMode}
-                  aria-haspopup="menu"
-                  aria-expanded={workModeMenuOpen}
-                  aria-pressed={pendingWorkMode !== "standard"}
-                  aria-keyshortcuts="Meta+Period Control+Period"
-                  title={titleForPendingWorkMode(pendingWorkMode)}
-                  className={cn(
-                    "inline-flex items-center gap-1.5 rounded-full border px-2.5 py-1 text-(length:--text-micro) font-semibold transition-colors",
-                    pendingWorkModeMeta.classes.chip,
-                  )}
-                >
-                  <PendingWorkModeIcon className="h-3.5 w-3.5" aria-hidden />
-                  <span>{pendingWorkModeMeta.label}</span>
-                  <ChevronDown className="h-3 w-3 opacity-60" aria-hidden />
-                </button>
-              </PopoverTrigger>
-              <PopoverContent
-                className="w-44 p-1"
-                align="start"
-                data-testid="issue-chat-composer-work-mode-menu"
-              >
-                {workModeOptions.map((option) => {
-                  const Icon = option.icon;
-                  const active = option.value === pendingWorkMode;
-                  return (
-                    <button
-                      key={option.value}
-                      type="button"
-                      data-testid={`issue-chat-composer-work-mode-menu-${option.value}`}
-                      data-pending-work-mode={pendingWorkMode}
-                      className={cn(
-                        "flex w-full items-center gap-2 rounded px-2 py-1.5 text-xs hover:bg-accent/50",
-                        active && "bg-accent",
-                        option.classes.menuItem,
-                      )}
-                      onClick={() => {
-                        setPendingWorkMode(option.value);
-                        setWorkModeMenuOpen(false);
-                      }}
-                    >
-                      <Icon className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      <span>{option.label}</span>
-                      {active ? (
-                        <Check className="h-3.5 w-3.5 shrink-0" aria-hidden />
-                      ) : null}
-                    </button>
-                  );
-                })}
-                <div className="mt-1 border-t px-2 py-1.5 text-(length:--text-nano) text-muted-foreground">
-                  Cmd/Ctrl+. cycles modes
-                </div>
-              </PopoverContent>
-            </Popover>
-          ) : null}
+          <ComposerAddMenu mode={pendingWorkMode}
+            onModeChange={canToggleWorkMode ? setPendingWorkMode : undefined}
+            onAttachFile={canAcceptFiles ? () => attachInputRef.current?.click() : undefined}
+            disabled={attaching || !!uncertainSubmission}
+            triggerTestId="issue-chat-composer-add" menuTestId="issue-chat-composer-add-menu" />
+          <ComposerModeChip mode={pendingWorkMode}
+            onRemove={canToggleWorkMode ? () => setPendingWorkMode("standard") : undefined}
+            disabled={attaching || !!uncertainSubmission}
+            testId="issue-chat-composer-work-mode-chip" />
         </div>
 
         {enableReassign && reassignOptions.length > 0 && companyId && agentMap ? (

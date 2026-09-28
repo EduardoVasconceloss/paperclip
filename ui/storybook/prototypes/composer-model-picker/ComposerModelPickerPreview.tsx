@@ -2,6 +2,9 @@ import { useEffect, useLayoutEffect, useRef, useState, type CSSProperties, type 
 import { ArrowLeft, ArrowUp, Bot, Check, ChevronDown, ChevronRight, Plus, RotateCcw, Search, X, Zap } from "lucide-react";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
+import { ComposerAddMenu, ComposerModeChip } from "@/components/task-chat/ComposerAddMenu";
+import { nextWorkMode } from "@/lib/work-mode-meta";
+import type { IssueWorkMode } from "@paperclipai/shared";
 import { cn } from "@/lib/utils";
 import { composerAgents, effortChoices, effortLabels, fastModeAvailable, modelLabel, type ComposerAgent } from "./fixtures";
 import "./picker.css";
@@ -72,6 +75,9 @@ export function ComposerModelPickerPreview({
   const [assigneeSearch, setAssigneeSearch] = useState(initialAssigneeSearch);
   const [highlightedAssigneeIndex, setHighlightedAssigneeIndex] = useState(0);
   const [draft, setDraft] = useState("");
+  const [mode, setMode] = useState<IssueWorkMode>("standard");
+  const [attachments, setAttachments] = useState<string[]>([]);
+  const fileInputRef = useRef<HTMLInputElement>(null);
   const [messages, setMessages] = useState<SentMessage[]>([]);
   const [mobile, setMobile] = useState(() => typeof window !== "undefined" && window.matchMedia("(max-width: 639px)").matches);
 
@@ -243,13 +249,19 @@ export function ComposerModelPickerPreview({
 
         <div className="rounded-xl border border-border bg-card p-3 shadow-sm">
           <textarea value={draft} onChange={(event) => setDraft(event.target.value)}
-            onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); } }}
+            onKeyDown={(event) => {
+              if ((event.metaKey || event.ctrlKey) && event.key === ".") { event.preventDefault(); setMode(nextWorkMode); return; }
+              if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); send(); }
+            }}
             placeholder={`Message ${agent.name} — describe what you want done…`}
             aria-label="Message" rows={2}
             className="block min-h-16 w-full resize-y bg-transparent text-sm leading-6 text-foreground outline-none placeholder:text-muted-foreground" />
-          <div className="mt-3 flex min-w-0 items-center gap-1.5 border-t border-border/50 pt-3">
-            <button type="button" aria-label="Attach file (preview only)" title="Attach file (preview only)" className="grid size-8 shrink-0 place-items-center rounded-md text-muted-foreground hover:bg-accent"><Plus className="size-4" aria-hidden /></button>
-            <span className="hidden rounded-md bg-muted px-2.5 py-1.5 text-xs text-muted-foreground sm:inline-flex">Auto mode</span>
+          {attachments.length ? <div className="mt-2 flex flex-wrap gap-2">{attachments.map((name, index) => <button key={`${name}-${index}`} type="button" onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))} className="rounded-md bg-muted px-2 py-1 text-xs">{name} ×</button>)}</div> : null}
+          <div className="mt-3 flex min-w-0 items-center gap-1.5">
+            <input ref={fileInputRef} type="file" className="hidden" onChange={(event) => { setAttachments((items) => [...items, ...Array.from(event.target.files ?? []).map((file) => file.name)]); event.target.value = ""; }} />
+            <ComposerAddMenu mode={mode} onModeChange={setMode} onAttachFile={() => fileInputRef.current?.click()}
+              onGoal={agent.adapterType === "codex_local" ? () => setDraft((current) => /^\/goal(?:\s|$)/.test(current) ? current : `/goal ${current}`) : undefined} />
+            <ComposerModeChip mode={mode} onRemove={() => setMode("standard")} />
             <span className="hidden min-w-0 flex-1 sm:block" />
 
             {mobile ? (

@@ -730,20 +730,19 @@ describe("IssueChatThread", () => {
     expect(composer?.getAttribute("data-pending-work-mode")).toBe("planning");
     expect(composer?.className).toContain("amber");
 
-    const toggle = container.querySelector(
-      '[data-testid="issue-chat-composer-work-mode-toggle"]',
+    const chip = container.querySelector(
+      '[data-testid="issue-chat-composer-work-mode-chip"]',
     );
-    expect(toggle).not.toBeNull();
-    expect(toggle?.getAttribute("data-pending-work-mode")).toBe("planning");
-    expect(toggle?.getAttribute("aria-pressed")).toBe("true");
-    expect(toggle?.textContent).toContain("Plan mode");
+    expect(chip).not.toBeNull();
+    expect(chip?.getAttribute("data-pending-work-mode")).toBe("planning");
+    expect(chip?.textContent).toContain("Plan mode");
 
     act(() => {
       root.unmount();
     });
   });
 
-  it("shows a persistent neutral mode chip on a standard issue and selects planning through its menu", () => {
+  it("selects planning from the add menu and removes its chip", () => {
     const root = createRoot(container);
     const onWorkModeChange = vi.fn();
 
@@ -764,13 +763,9 @@ describe("IssueChatThread", () => {
       );
     });
 
-    // The mode chip is always present (mockup rev 5) — neutral "Auto mode" here.
-    const chip = container.querySelector(
-      '[data-testid="issue-chat-composer-work-mode-toggle"]',
-    ) as HTMLButtonElement | null;
-    expect(chip).not.toBeNull();
-    expect(chip?.getAttribute("data-pending-work-mode")).toBe("standard");
-    expect(chip?.textContent).toContain("Auto mode");
+    expect(container.querySelector('[data-testid="issue-chat-composer-work-mode-chip"]')).toBeNull();
+    const add = container.querySelector('[data-testid="issue-chat-composer-add"]') as HTMLButtonElement;
+    expect(add).not.toBeNull();
 
     const composer = container.querySelector(
       '[data-testid="issue-chat-composer"]',
@@ -779,11 +774,11 @@ describe("IssueChatThread", () => {
     expect(composer?.className).not.toContain("amber");
 
     act(() => {
-      chip?.click();
+      add.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
     });
 
     const menuItem = document.querySelector(
-      '[data-testid="issue-chat-composer-work-mode-menu-planning"]',
+      '[data-testid="composer-add-plan"]',
     ) as HTMLButtonElement | null;
     expect(menuItem).not.toBeNull();
     expect(menuItem?.textContent).toContain("Plan mode");
@@ -796,7 +791,11 @@ describe("IssueChatThread", () => {
     expect(onWorkModeChange).not.toHaveBeenCalled();
     expect(composer?.getAttribute("data-pending-work-mode")).toBe("planning");
     expect(composer?.className).toContain("amber");
+    const chip = container.querySelector('[data-testid="issue-chat-composer-work-mode-chip"]') as HTMLButtonElement;
     expect(chip?.textContent).toContain("Plan mode");
+    act(() => chip.click());
+    expect(composer?.getAttribute("data-pending-work-mode")).toBe("standard");
+    expect(container.querySelector('[data-testid="issue-chat-composer-work-mode-chip"]')).toBeNull();
 
     act(() => {
       root.unmount();
@@ -824,21 +823,19 @@ describe("IssueChatThread", () => {
       );
     });
 
-    const chip = container.querySelector(
-      '[data-testid="issue-chat-composer-work-mode-toggle"]',
-    ) as HTMLButtonElement | null;
+    const add = container.querySelector('[data-testid="issue-chat-composer-add"]') as HTMLButtonElement;
     const composer = container.querySelector(
       '[data-testid="issue-chat-composer"]',
     ) as HTMLDivElement | null;
-    expect(chip).not.toBeNull();
+    expect(add).not.toBeNull();
     expect(composer).not.toBeNull();
 
     act(() => {
-      chip?.click();
+      add.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
     });
 
     const askMenuItem = document.querySelector(
-      '[data-testid="issue-chat-composer-work-mode-menu-ask"]',
+      '[data-testid="composer-add-ask"]',
     ) as HTMLButtonElement | null;
     expect(askMenuItem).not.toBeNull();
     expect(askMenuItem?.textContent).toContain("Ask mode");
@@ -850,7 +847,7 @@ describe("IssueChatThread", () => {
     expect(onWorkModeChange).not.toHaveBeenCalled();
     expect(composer?.getAttribute("data-pending-work-mode")).toBe("ask");
     expect(composer?.className).toContain("sky");
-    expect(chip?.textContent).toContain("Ask mode");
+    expect(container.querySelector('[data-testid="issue-chat-composer-work-mode-chip"]')?.textContent).toContain("Ask mode");
 
     act(() => {
       composer?.dispatchEvent(
@@ -864,7 +861,7 @@ describe("IssueChatThread", () => {
     });
 
     expect(composer?.getAttribute("data-pending-work-mode")).toBe("standard");
-    expect(chip?.textContent).toContain("Auto mode");
+    expect(container.querySelector('[data-testid="issue-chat-composer-work-mode-chip"]')).toBeNull();
 
     act(() => {
       root.unmount();
