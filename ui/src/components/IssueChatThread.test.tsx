@@ -3276,6 +3276,57 @@ describe("IssueChatThread", () => {
     act(() => root.unmount());
   });
 
+  it("settles a restored submission only once through StrictMode effect replay", () => {
+    const key = "strict-restored-submission";
+    const attemptId = "aaf8228f-0be7-45ae-a104-6fbe0af6f1d3";
+    const submitted = "One text-only save interrupted by reload.";
+    const nextDraft = "A newer draft written while delivery was pending.";
+    localStorage.setItem(key, `${submitted}\n\n${nextDraft}`);
+    localStorage.setItem(`${key}:submission:v1`, JSON.stringify({
+      version: 1,
+      draftKey: key,
+      attemptId,
+      reviewed: false,
+      nextDraftOffset: submitted.length + 2,
+      submittedAttachmentIds: [],
+    }));
+    const root = createRoot(container);
+    try {
+      act(() => root.render(
+        <StrictMode>
+          <MemoryRouter>
+            <IssueChatThread
+              comments={[{
+                ...issueChatLongThreadComments[0]!,
+                id: "confirmed-restored-comment",
+                body: submitted,
+                authorAgentId: null,
+                authorUserId: "user-1",
+                clientRequestId: attemptId,
+              }]}
+              currentUserId="user-1"
+              linkedRuns={[]}
+              timelineEvents={[]}
+              liveRuns={[]}
+              onAdd={async () => {}}
+              draftKey={key}
+              enableLiveTranscriptPolling={false}
+            />
+          </MemoryRouter>
+        </StrictMode>,
+      ));
+      expect(container.querySelector<HTMLTextAreaElement>(
+        'textarea[aria-label="Issue chat editor"]',
+      )?.value).toBe(nextDraft);
+      expect(localStorage.getItem(key)).toBe(nextDraft);
+      expect(localStorage.getItem(`${key}:submission:v1`)).toBeNull();
+      expect(container.textContent).not.toContain("We couldn’t confirm");
+    } finally {
+      act(() => root.unmount());
+    }
+    expect(localStorage.getItem(key)).toBe(nextDraft);
+  });
+
   it("stores and restores the composer draft per issue key", () => {
     vi.useFakeTimers();
     const root = createRoot(container);

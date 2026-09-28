@@ -4824,7 +4824,7 @@ const IssueChatComposer = forwardRef<
     if (!uncertainSubmission || !confirmedSubmissionIds.has(uncertainSubmission.attemptId)) return;
     const nextDraft = uncertainSubmission.nextDraftOffset === undefined
       ? "" : bodyRef.current.slice(uncertainSubmission.nextDraftOffset);
-    if (draftKey) settleDraftSubmission(draftKey, uncertainSubmission.attemptId, nextDraft);
+    if (draftKey && !settleDraftSubmission(draftKey, uncertainSubmission.attemptId, nextDraft)) return;
     setUncertainSubmission(null);
     setBody(nextDraft);
     bodyRef.current = nextDraft;
