@@ -3448,26 +3448,33 @@ describe("IssueChatThread", () => {
     });
   });
 
-  it("shows non-image attachment upload state in the composer after a drop", async () => {
+  it("keeps mode controls available while a dropped file uploads", async () => {
     const root = createRoot(container);
-    const onAttachImage = vi.fn(async (file: File) => ({
-      id: "attachment-1",
-      companyId: "company-1",
-      issueId: "issue-1",
-      issueCommentId: null,
-      assetId: "asset-1",
-      provider: "local_disk",
-      objectKey: "issues/issue-1/report.pdf",
-      contentPath: "/api/attachments/attachment-1/content",
-      originalFilename: file.name,
-      contentType: file.type,
-      byteSize: file.size,
-      sha256: "abc123",
-      createdByAgentId: null,
-      createdByUserId: "user-1",
-      createdAt: new Date("2026-04-24T12:00:00.000Z"),
-      updatedAt: new Date("2026-04-24T12:00:00.000Z"),
-    }));
+    let finishUpload: () => void = () => {};
+    const uploadGate = new Promise<void>((resolve) => {
+      finishUpload = resolve;
+    });
+    const onAttachImage = vi.fn(async (file: File) => {
+      await uploadGate;
+      return {
+        id: "attachment-1",
+        companyId: "company-1",
+        issueId: "issue-1",
+        issueCommentId: null,
+        assetId: "asset-1",
+        provider: "local_disk",
+        objectKey: "issues/issue-1/report.pdf",
+        contentPath: "/api/attachments/attachment-1/content",
+        originalFilename: file.name,
+        contentType: file.type,
+        byteSize: file.size,
+        sha256: "abc123",
+        createdByAgentId: null,
+        createdByUserId: "user-1",
+        createdAt: new Date("2026-04-24T12:00:00.000Z"),
+        updatedAt: new Date("2026-04-24T12:00:00.000Z"),
+      };
+    });
 
     await act(async () => {
       root.render(
@@ -3479,6 +3486,8 @@ describe("IssueChatThread", () => {
             liveRuns={[]}
             onAdd={async () => {}}
             onAttachImage={onAttachImage}
+            issueWorkMode="standard"
+            onWorkModeChange={() => {}}
             enableLiveTranscriptPolling={false}
           />
         </MemoryRouter>,
@@ -3492,11 +3501,28 @@ describe("IssueChatThread", () => {
       type: "application/pdf",
     });
 
-    await act(async () => {
+    act(() => {
       composer?.dispatchEvent(createFileDragEvent("drop", [file]));
     });
 
     expect(onAttachImage).toHaveBeenCalledWith(file);
+    const add = container.querySelector('[data-testid="issue-chat-composer-add"]') as HTMLButtonElement;
+    expect(add.disabled).toBe(false);
+    act(() => {
+      add.dispatchEvent(new PointerEvent("pointerdown", { bubbles: true, button: 0 }));
+    });
+    expect(document.querySelector('[data-testid="composer-add-file"]')?.getAttribute("data-disabled")).not.toBeNull();
+    const plan = document.querySelector('[data-testid="composer-add-plan"]') as HTMLButtonElement;
+    act(() => plan.click());
+    const chip = container.querySelector('[data-testid="issue-chat-composer-work-mode-chip"]') as HTMLButtonElement;
+    expect(chip?.textContent).toContain("Plan mode");
+    expect(chip.disabled).toBe(false);
+    act(() => chip.click());
+    expect(container.querySelector('[data-testid="issue-chat-composer-work-mode-chip"]')).toBeNull();
+
+    await act(async () => {
+      finishUpload();
+    });
     const attachmentList = container.querySelector(
       '[data-testid="issue-chat-composer-attachments"]',
     );

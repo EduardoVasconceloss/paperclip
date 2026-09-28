@@ -5546,11 +5546,12 @@ const IssueChatComposer = forwardRef<
           <ComposerAddMenu mode={pendingWorkMode}
             onModeChange={canToggleWorkMode ? setPendingWorkMode : undefined}
             onAttachFile={canAcceptFiles ? () => attachInputRef.current?.click() : undefined}
-            disabled={attaching || !!uncertainSubmission}
+            attachDisabled={attaching}
+            disabled={!!uncertainSubmission}
             triggerTestId="issue-chat-composer-add" menuTestId="issue-chat-composer-add-menu" />
           <ComposerModeChip mode={pendingWorkMode}
             onRemove={canToggleWorkMode ? () => setPendingWorkMode("standard") : undefined}
-            disabled={attaching || !!uncertainSubmission}
+            disabled={!!uncertainSubmission}
             testId="issue-chat-composer-work-mode-chip" />
         </div>
 

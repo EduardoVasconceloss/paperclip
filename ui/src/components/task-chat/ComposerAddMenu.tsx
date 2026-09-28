@@ -13,6 +13,7 @@ interface ComposerAddMenuProps {
   mode: IssueWorkMode;
   onModeChange?: (mode: IssueWorkMode) => void;
   onAttachFile?: () => void;
+  attachDisabled?: boolean;
   onGoal?: () => void;
   disabled?: boolean;
   triggerTestId?: string;
@@ -20,7 +21,7 @@ interface ComposerAddMenuProps {
 }
 
 export function ComposerAddMenu({
-  mode, onModeChange, onAttachFile, onGoal, disabled, triggerTestId, menuTestId,
+  mode, onModeChange, onAttachFile, attachDisabled, onGoal, disabled, triggerTestId, menuTestId,
 }: ComposerAddMenuProps) {
   if (!onModeChange && !onAttachFile && !onGoal) return null;
   return <DropdownMenu>
@@ -34,7 +35,7 @@ export function ComposerAddMenu({
     <DropdownMenuContent side="top" align="start" sideOffset={8} data-testid={menuTestId}
       className="w-(--sz-300px) rounded-xl p-1.5 shadow-sm">
       <div className="px-2 py-1 text-xs text-muted-foreground">Add</div>
-      {onAttachFile ? <DropdownMenuItem onSelect={onAttachFile} data-testid="composer-add-file">
+      {onAttachFile ? <DropdownMenuItem onSelect={onAttachFile} disabled={attachDisabled} data-testid="composer-add-file">
         <Paperclip className="size-4" aria-hidden />
         <span className="flex-1">Files and images</span>
       </DropdownMenuItem> : null}
