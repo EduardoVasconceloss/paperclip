@@ -3,14 +3,24 @@
 Select **Grok Build** in the native runner provider selector. The stored contract is
 `adapterType: "paperclip_runner"` with `provider: "acpx"`, `acpxAgent: "grok"`,
 and `model: "grok-4.7"`. Existing `grok_local` agents keep their legacy adapter.
+New Grok runner agents default to **Full auto (approve all)**
+(`acpxPermissionMode: "approve-all"`) in setup and the configuration form.
+API configurations that omit the permission mode use the same default. No
+additional permission setting is needed for unattended execution. Explicitly
+saved restrictions remain unchanged.
 On Cloud, an operator must enable `enableNativeRunner` for the instance before
 the new-agent picker or direct setup page offers the native runner.
 
 Grok Build speaks [ACP over stdio](https://github.com/xai-org/grok-build/blob/main/crates/codegen/xai-grok-pager/docs/user-guide/15-agent-mode.md).
 The runner owns `grok agent --no-leader stdio` through ACPX, including session
 identity, cancellation, recovery and the authenticated Paperclip MCP bridge.
-It does not add `--always-approve`. Restricted operations use the selected ACPX
-permission policy and return the existing approval-required outcome. Isolated ask
+ACP permission requests are approved by the runner under the default full-auto
+policy. It does not add `--always-approve`: permission decisions remain under
+the selected ACPX policy. Grok's ACP metadata cannot independently establish
+Paperclip tool authority, so explicitly selecting `approve-paperclip` or
+`approve-reads` returns the approval-required outcome; `deny-all` rejects requests.
+Full auto does not bypass Paperclip's company permissions, governed approvals,
+or execution-environment boundaries. Isolated ask
 rules override project allow rules, and compatible always-approve settings are
 locked off. Compatible hook/MCP discovery and shell login capture are disabled.
 

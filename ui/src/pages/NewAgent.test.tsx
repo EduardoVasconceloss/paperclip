@@ -277,7 +277,7 @@ describe("New agent setup", () => {
     const binding = { provider: "xai", method, mode: "responsible_user" };
     expect(api.testEnvironment).toHaveBeenLastCalledWith("company-1", adapterType, expect.objectContaining({
       environmentId: "sandbox-1",
-      adapterConfig: expect.objectContaining({ model, ...(adapterType === "paperclip_runner" ? { provider: "acpx", acpxAgent: "grok" } : {}) }),
+      adapterConfig: expect.objectContaining({ model, ...(adapterType === "paperclip_runner" ? { provider: "acpx", acpxAgent: "grok", acpxPermissionMode: "approve-all" } : {}) }),
       aiConnection: binding,
       testCredentials: {},
     }));
@@ -286,7 +286,7 @@ describe("New agent setup", () => {
     expect(api.hire.mock.calls[0][1]).toMatchObject({
       adapterType,
       defaultEnvironmentId: "sandbox-1",
-      adapterConfig: { model, ...(adapterType === "paperclip_runner" ? { provider: "acpx", acpxAgent: "grok" } : {}) },
+      adapterConfig: { model, ...(adapterType === "paperclip_runner" ? { provider: "acpx", acpxAgent: "grok", acpxPermissionMode: "approve-all" } : {}) },
       runtimeConfig: { aiConnection: binding, heartbeat: { enabled: false } },
     });
     expect(JSON.stringify(api.testEnvironment.mock.calls)).not.toContain("example-test-secret");
