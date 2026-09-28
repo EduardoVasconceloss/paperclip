@@ -113,8 +113,8 @@ export const KimiSupported: Story = {
   args: { agentId: "kimi", initialPanel: "settings", initialEffort: "high" },
 };
 export const KimiModelDefault: Story = {
-  name: "13 · Kimi K2.7 · no effort override",
-  args: { agentId: "kimi", initialModel: "kimi-code/kimi-for-coding", initialPanel: "settings" },
+  name: "13 · Kimi highspeed · no effort override",
+  args: { agentId: "kimi", initialModel: "kimi-code/kimi-for-coding-highspeed", initialPanel: "settings" },
 };
 export const GeminiModelOnly: Story = {
   name: "14 · Gemini · model only",

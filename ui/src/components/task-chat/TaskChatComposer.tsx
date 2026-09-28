@@ -74,6 +74,9 @@ import type { ActionCommandOption } from "@/context/EditorAutocompleteContext";
 import { TaskChatComposerTakeoverActionsContext } from "./TaskChatComposerTakeoverContext";
 
 import { TaskChatPausedTakeover, type TaskComposerPause } from "./TaskChatPausedTakeover";
+import { ComposerRunSettingsPicker } from "./ComposerRunSettingsPicker";
+import type { ComposerRunSettings } from "./composer-run-settings";
+import type { Agent, IssueAssigneeAdapterOverrides } from "@paperclipai/shared";
 
 /** Structurally identical to IssueChatThread's module-private CommentReassignment. */
 export interface CommentReassignment {
@@ -104,6 +107,7 @@ interface TaskChatComposerProps {
     reassignment?: CommentReassignment,
     attachmentIds?: string[],
     clientRequestId?: string,
+    runSettings?: ComposerRunSettings,
   ) => Promise<void> | void;
   confirmedSubmissionIds?: ReadonlySet<string>;
   onStop?: () => Promise<void>;
@@ -124,6 +128,9 @@ interface TaskChatComposerProps {
   conversationMode?: boolean;
   reassignOptions?: InlineEntityOption[];
   agentMap?: ReadonlyMap<string, import("../AgentAvatar").AvatarAgent & { icon?: string | null }>;
+  modelAgents?: ReadonlyMap<string, Agent>;
+  companyId?: string | null;
+  assigneeAdapterOverrides?: IssueAssigneeAdapterOverrides | null;
   userProfileMap?: ReadonlyMap<
     string,
     { label: string; image: string | null }
@@ -395,6 +402,9 @@ export function TaskChatComposer({
   conversationMode = false,
   reassignOptions,
   agentMap,
+  modelAgents,
+  companyId,
+  assigneeAdapterOverrides,
   userProfileMap,
   currentAssigneeValue = "",
   onPendingAssigneeChange,
@@ -438,6 +448,8 @@ export function TaskChatComposer({
     useState<HTMLElement | null>(null);
   const [pendingMode, setPendingMode] = useState<IssueWorkMode>(workMode);
   const [pendingAssignee, setPendingAssignee] = useState<string | null>(null);
+  const [runSettings, setRunSettings] = useState<ComposerRunSettings | null>(null);
+  useEffect(() => setRunSettings(null), [draftKey, currentAssigneeValue]);
   const [actionError, setActionError] = useState<string | null>(null);
   const [attachments, setAttachmentState] = useState<ComposerAttachment[]>(
     () =>
@@ -1003,7 +1015,11 @@ export function TaskChatComposer({
         pendingDraftRef.current = { draftKey, attemptId, submittedBody, submittedAttachmentIds: attachmentIds };
         changeBody(bodyRef.current);
       }
-      await onAdd(fullBody, reopen, reassignment, attachmentIds.length ? attachmentIds : undefined, attemptId);
+      if (runSettings) {
+        await onAdd(fullBody, reopen, reassignment, attachmentIds.length ? attachmentIds : undefined, attemptId, runSettings);
+      } else {
+        await onAdd(fullBody, reopen, reassignment, attachmentIds.length ? attachmentIds : undefined, attemptId);
+      }
       // Navigation does not invalidate the server receipt. Settle the captured
       // task before checking whether this composer is still on screen.
       if (draftKey) settleDraftSubmission(draftKey, attemptId,
@@ -1016,6 +1032,7 @@ export function TaskChatComposer({
       if (pendingAssigneeRef.current === submittedAssignee) {
         updatePendingAssignee(null);
       }
+      setRunSettings(null);
     } catch (error) {
       if (mountedTaskKey.current !== draftKey) return;
       const nextDraft = bodyRef.current;
@@ -1504,7 +1521,30 @@ export function TaskChatComposer({
 
             <div className="flex-1" />
 
-            {showAssignee && !queuedEdit ? (
+            {showAssignee && !queuedEdit && companyId && modelAgents ? (
+              <ComposerRunSettingsPicker
+                companyId={companyId}
+                assigneeValue={assigneeValue}
+                currentAssigneeValue={currentAssigneeValue}
+                options={reassignOptions ?? []}
+                agents={modelAgents}
+                overrides={assigneeAdapterOverrides}
+                settings={runSettings}
+                onSettingsChange={setRunSettings}
+                onAssigneeChange={updatePendingAssignee}
+                renderAssigneeIdentity={(value, label, placement) => (
+                  <AssigneeIdentityAvatar
+                    assigneeValue={value}
+                    label={label}
+                    agentMap={agentMap}
+                    userProfileMap={userProfileMap}
+                    placement={placement}
+                  />
+                )}
+                disabled={disabled}
+                mobile={mobile}
+              />
+            ) : showAssignee && !queuedEdit ? (
               <InlineEntitySelector
                 value={assigneeValue}
                 options={reassignOptions ?? []}

@@ -1,5 +1,7 @@
 import { DispositionRecoveryNotice, useDispositionRecoverySnapshot } from "./DispositionRecoveryNotice";
 import { AgentAvatar } from "@/components/AgentAvatar";
+import type { ComposerRunSettings } from "./task-chat/composer-run-settings";
+import { ComposerRunSettingsPicker } from "./task-chat/ComposerRunSettingsPicker";
 import { TaskChatPausedTakeover, type TaskComposerPause } from "./task-chat/TaskChatPausedTakeover";
 import { useEmailComment } from "./EmailMessageCard";
 import { AssistantRuntimeProvider } from "@assistant-ui/react";
@@ -46,6 +48,7 @@ import type {
   SuccessfulRunHandoffState,
   IssueWorkMode,
   IssueWorkProduct,
+  IssueAssigneeAdapterOverrides,
 } from "@paperclipai/shared";
 import type { ActiveRunForIssue, LiveRunForIssue } from "../api/heartbeats";
 import { findUIAdapter } from "../adapters/registry";
@@ -515,6 +518,8 @@ interface IssueChatComposerProps {
   enableReassign?: boolean;
   reassignOptions?: InlineEntityOption[];
   currentAssigneeValue?: string;
+  companyId?: string | null;
+  assigneeAdapterOverrides?: IssueAssigneeAdapterOverrides | null;
   suggestedAssigneeValue?: string;
   mentions?: MentionOption[];
   agentMap?: Map<string, Agent>;
@@ -606,6 +611,7 @@ interface IssueChatThreadProps {
     reassignment?: CommentReassignment,
     attachmentIds?: string[],
     clientRequestId?: string,
+    runSettings?: ComposerRunSettings,
   ) => Promise<void>;
   onReviewConversation?: () => Promise<void>;
   onCancelRun?: () => Promise<void>;
@@ -622,6 +628,7 @@ interface IssueChatThreadProps {
   enableReassign?: boolean;
   reassignOptions?: InlineEntityOption[];
   currentAssigneeValue?: string;
+  assigneeAdapterOverrides?: IssueAssigneeAdapterOverrides | null;
   suggestedAssigneeValue?: string;
   mentions?: MentionOption[];
   composerPause?: TaskComposerPause | null;
@@ -4656,6 +4663,8 @@ const IssueChatComposer = forwardRef<
     enableReassign = false,
     reassignOptions = [],
     currentAssigneeValue = "",
+    companyId,
+    assigneeAdapterOverrides,
     suggestedAssigneeValue,
     mentions = [],
     agentMap,
@@ -4756,6 +4765,8 @@ const IssueChatComposer = forwardRef<
   const [reassignTarget, setReassignTarget] = useState(
     effectiveSuggestedAssigneeValue,
   );
+  const [runSettings, setRunSettings] = useState<ComposerRunSettings | null>(null);
+  useEffect(() => setRunSettings(null), [draftKey, currentAssigneeValue]);
   const [noAssigneeDialogOpen, setNoAssigneeDialogOpen] = useState(false);
   const [dismissedCoachToken, setDismissedCoachToken] = useState<string | null>(
     null,
@@ -5006,10 +5017,11 @@ const IssueChatComposer = forwardRef<
       }
       // assistant-ui thread.append is fire-and-forget. Await the actual Board
       // mutation; it already owns optimistic echo and durable error handling.
-      const sendPromise = onSend(
-        submittedBody, reopen, reassignment,
-        attachmentIds.length ? attachmentIds : undefined, attemptId,
-      );
+      const sendPromise = runSettings
+        ? onSend(submittedBody, reopen, reassignment,
+            attachmentIds.length ? attachmentIds : undefined, attemptId, runSettings)
+        : onSend(submittedBody, reopen, reassignment,
+            attachmentIds.length ? attachmentIds : undefined, attemptId);
       queueViewportRestore(viewportSnapshot);
       await sendPromise;
       // Settle the captured task even if the user navigated away. The exact
@@ -5021,6 +5033,7 @@ const IssueChatComposer = forwardRef<
         current.filter((item) => !submittedAttachmentKeys.has(item.id)),
       );
       setReassignTarget(effectiveSuggestedAssigneeValue);
+      setRunSettings(null);
     } catch (error) {
       if (mountedTaskKey.current !== draftKey) return;
       const nextDraft = bodyRef.current;
@@ -5614,7 +5627,24 @@ const IssueChatComposer = forwardRef<
           ) : null}
         </div>
 
-        {enableReassign && reassignOptions.length > 0 ? (
+        {enableReassign && reassignOptions.length > 0 && companyId && agentMap ? (
+          <ComposerRunSettingsPicker
+            companyId={companyId}
+            assigneeValue={reassignTarget}
+            currentAssigneeValue={currentAssigneeValue}
+            options={reassignOptions}
+            agents={agentMap}
+            overrides={assigneeAdapterOverrides}
+            settings={runSettings}
+            onSettingsChange={setRunSettings}
+            onAssigneeChange={setReassignTarget}
+            triggerRef={reassignTriggerRef}
+            renderAssigneeIdentity={(value) => {
+              const selected = value.startsWith("agent:") ? agentMap.get(value.slice(6)) : null;
+              return selected ? <AgentAvatar agent={selected} size={16} className="size-4 shrink-0" /> : null;
+            }}
+          />
+        ) : enableReassign && reassignOptions.length > 0 ? (
           <InlineEntitySelector
             ref={reassignTriggerRef}
             value={reassignTarget}
@@ -5768,6 +5798,7 @@ export function IssueChatThread({
   canFalsePositiveRecoveryAction = false,
   legacyRecoverySourceIssue = null,
   companyId,
+  assigneeAdapterOverrides,
   projectId,
   issueStatus,
   issueAssigneeAgentId = null,
@@ -6076,9 +6107,11 @@ export function IssueChatThread({
   }
 
   const sendComposerComment = useCallback<IssueChatThreadProps["onAdd"]>(
-    (body, reopen, reassignment, attachmentIds, clientRequestId) => {
+    (body, reopen, reassignment, attachmentIds, clientRequestId, runSettings) => {
       pendingSubmitScrollRef.current = true;
-      return onAdd(body, reopen, reassignment, attachmentIds, clientRequestId);
+      return runSettings
+        ? onAdd(body, reopen, reassignment, attachmentIds, clientRequestId, runSettings)
+        : onAdd(body, reopen, reassignment, attachmentIds, clientRequestId);
     },
     [onAdd],
   );
@@ -6751,6 +6784,8 @@ export function IssueChatThread({
                 enableReassign={enableReassign}
                 reassignOptions={reassignOptions}
                 currentAssigneeValue={currentAssigneeValue}
+                companyId={companyId}
+                assigneeAdapterOverrides={assigneeAdapterOverrides}
                 suggestedAssigneeValue={suggestedAssigneeValue}
                 mentions={mentions}
                 agentMap={agentMap}

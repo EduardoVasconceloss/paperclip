@@ -330,6 +330,7 @@ describe("issue update comment wakeups", () => {
       externalConversationState,
       assigneeAgentId: ASSIGNEE_AGENT_ID,
       assigneeUserId: null,
+      assigneeAdapterOverrides: { adapterConfig: { model: "gpt-6-astra", modelReasoningEffort: "ultra", fastMode: true } },
     });
     mockIssueService.getById.mockResolvedValue(existing);
     mockIssueService.update.mockResolvedValue(updated);
@@ -347,9 +348,13 @@ describe("issue update comment wakeups", () => {
         assigneeUserId: null,
         comment: "write the whole thing",
         commentClientRequestId: "55555555-5555-4555-8555-555555555555",
+        assigneeAdapterOverrides: updated.assigneeAdapterOverrides,
       });
 
     expect(res.status).toBe(200);
+    expect(mockIssueService.update).toHaveBeenCalledWith(existing.id, expect.objectContaining({
+      assigneeAdapterOverrides: updated.assigneeAdapterOverrides,
+    }));
     expect(mockIssueService.addComment).toHaveBeenCalledWith(existing.id, "write the whole thing", expect.anything(),
       expect.objectContaining({ clientRequestId: "55555555-5555-4555-8555-555555555555" }));
     // The route dispatches the wake after it sends the response, so wait for

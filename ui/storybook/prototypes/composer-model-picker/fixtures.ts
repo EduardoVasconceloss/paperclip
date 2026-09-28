@@ -43,8 +43,9 @@ export const composerAgents: ComposerAgent[] = [
   ], manualPattern: "provider/model" },
   { id: "kimi", name: "Kimi", role: "Planning", harness: "Kimi Code", adapterType: "kimi_local", provider: "CLI engine", defaultModel: "kimi-code/k3", models: [
     { id: "kimi-code/k3", label: "K3", detail: "Supports effort on CLI" },
-    { id: "kimi-code/kimi-for-coding", label: "K2.7 Coding", detail: "Uses model default" },
+    { id: "kimi-code/kimi-for-coding", label: "K2.8 Preview", detail: "Supports effort on CLI" },
     { id: "kimi-code/kimi-for-coding-highspeed", label: "K2.7 Coding Highspeed", detail: "Uses model default" },
+    { id: "kimi-code/k3-256k", label: "K3 (256K)", detail: "Supports effort on CLI" },
   ], manualPattern: "kimi-code/model" },
   { id: "gemini", name: "Gem", role: "Analysis", harness: "Gemini CLI", adapterType: "gemini_local", defaultModel: "auto", models: [
     { id: "auto", label: "Auto" },
