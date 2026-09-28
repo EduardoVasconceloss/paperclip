@@ -18646,7 +18646,7 @@ export function heartbeatService(
             lease,
           });
           const released = hasNativeWorkspaceExportResume(lease)
-            ? await settleNativeWorkspaceExportResume(db, lease, { attemptId: claimed, receipt, status: "expired" })
+            ? await settleNativeWorkspaceExportResume(db, lease, { attemptId: claimed, receipt })
             : await environmentsSvc.releaseLease(lease.id, "expired", {
             expectedPendingCleanupAttemptId: claimed,
             cleanupStatus: "success",
@@ -18805,7 +18805,7 @@ export function heartbeatService(
       agentId: input.agentId,
       status: settledRun?.status,
       failureReason: settledRun?.error ?? undefined,
-      providerResourceDisposition: input.succeeded && !parseObject(settledRun?.resultJson).workspaceExportRetry
+      providerResourceDisposition: input.succeeded && (!parseObject(settledRun?.resultJson).workspaceExportRetry || workspaceSyncReference?.resourceDisposition === "destroy")
         ? (workspaceSyncReference?.resourceDisposition ?? "stop_and_retain")
         : "stop_and_retain",
     });
@@ -25464,7 +25464,9 @@ export function heartbeatService(
             message: err.terminalFailure
               ? err.reasonCode === "workspace_sync_out_unsafe_archive"
                 ? "native result is durable; workspace copy-back requires repair of an unsafe link or path in the retained sandbox"
-                : "native result is durable, but the sandbox containing unexported workspace changes is unrecoverable"
+                : err.reasonCode === "workspace_sync_out_failed"
+                  ? "native result is durable; automatic workspace copy-back retries stopped and saved work is retained for export repair"
+                  : "native result is durable, but the sandbox containing unexported workspace changes is unrecoverable"
               : "native result is durable; workspace copy-back will retry without another provider turn",
             payload: {
               attempt: coordinator?.attempt ?? null,

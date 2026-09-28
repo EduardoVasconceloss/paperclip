@@ -1,8 +1,8 @@
 import { readEnvironmentCreationCleanupError } from "@paperclipai/plugin-sdk";
 import { remoteTerminationReceipt } from "./remote-execution-termination.js";
-import { hasNativeWorkspaceExportResume, readNativeWorkspaceExportResume } from "./native-runtime/native-workspace-export-resume.js";
+import { hasNativeWorkspaceExportResume, readNativeWorkspaceExportResume, releaseCompletedNativeWorkspaceExportRetention, settleNativeWorkspaceExportResume } from "./native-runtime/native-workspace-export-resume.js";
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, inArray, ne, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, or, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { companySecrets, companySecretVersions, environmentLeases, heartbeatRuns } from "@paperclipai/db";
 import type {
@@ -479,6 +479,7 @@ export interface EnvironmentDriverAcquireInput {
 }
 
 export interface EnvironmentDriverReleaseInput {
+  resourceDisposition?: "stop_and_retain";
   /** Explicit Stop may terminate in-flight setup rather than drain it. */
   cancelActiveWork?: boolean;
   environment: Environment;
@@ -2579,7 +2580,7 @@ function createSandboxEnvironmentDriver(
         const [current] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, input.lease.id)).limit(1);
         const [otherOwner] = await db.select({ id: environmentLeases.id }).from(environmentLeases).where(and(
           ne(environmentLeases.id, input.lease.id), eq(environmentLeases.provider, input.lease.provider!),
-          eq(environmentLeases.providerLeaseId, input.lease.providerLeaseId!), inArray(environmentLeases.status, ["active", "pending_cleanup"]),
+          eq(environmentLeases.providerLeaseId, input.lease.providerLeaseId!), inArray(environmentLeases.status, ["active", "retained", "pending_cleanup"]),
         )).limit(1);
         if (!current || current.status !== "pending_cleanup" || current.companyId !== input.lease.companyId
           || current.metadata?.pendingCleanupAttemptId !== input.lease.metadata?.pendingCleanupAttemptId
@@ -2643,15 +2644,15 @@ function createSandboxEnvironmentDriver(
         const workerConfig = stripSandboxProviderEnvelope(config as SandboxEnvironmentConfig);
         if (exportResume) {
           const pluginId = pluginProvider.resolved.plugin.id;
-          if (!pluginWorkerVerifiesLifecycleMethod(pluginId, "environmentReleaseLease")) {
+          if (!pluginWorkerVerifiesLifecycleMethod(pluginId, "environmentStopLease")) {
             throw new Error("Workspace export recovery requires verified stop-only cleanup.");
           }
           await assertExportResumeOwnership();
-          const receipt = await pluginWorkerManager.call(pluginId, "environmentReleaseLease", {
+          const receipt = await pluginWorkerManager.call(pluginId, "environmentStopLease", {
             driverKey: recordedProvider, companyId: input.lease.companyId,
             environmentId: input.lease.environmentId ?? "", issueId: input.lease.issueId,
             config: workerConfig, providerLeaseId: input.lease.providerLeaseId,
-            leaseMetadata: input.lease.metadata ?? {}, cancelActiveWork: true,
+            leaseMetadata: input.lease.metadata ?? {}, cancelActiveWork: true, resourceDisposition: "stop_and_retain",
           }, Math.min(resolvePluginSandboxRpcTimeoutMs(workerConfig) ?? 60_000, 60_000));
           if (remoteTerminationReceipt(input.lease, receipt)?.state !== "stopped") {
             throw new Error("Workspace export recovery did not confirm the retained sandbox stopped.");
@@ -2725,7 +2726,8 @@ function createSandboxEnvironmentDriver(
         const pinnedPluginId = readString(input.lease.metadata?.pluginId);
         if (!pinnedPluginId) return true; // Permanent invalid intent, never a by-key fallback.
         const pinned = await resolvePluginSandboxProviderDriverById({ db, pluginId: pinnedPluginId, driverKey: recordedProvider });
-        return Boolean(pinned?.plugin.status === "ready" && pluginWorkerManager.isRunning(pinned.plugin.id));
+        return Boolean(pinned?.plugin.status === "ready" && pluginWorkerManager.isRunning(pinned.plugin.id)
+          && pluginWorkerVerifiesLifecycleMethod(pinned.plugin.id, "environmentStopLease"));
       }
       // Resolve the installed plugin without a wait. A plugin reload or a plugin
       // reinstall can remove the plugin row for a short window, so a missing
@@ -2834,7 +2836,8 @@ function createSandboxEnvironmentDriver(
       const providerKey = readString(input.lease.metadata?.provider);
       if (!input.lease.metadata?.sandboxProviderPlugin || !pluginWorkerManager || !pluginId || !providerKey
         || !input.lease.providerLeaseId || input.lease.environmentId !== input.environment.id
-        || !pluginWorkerVerifiesLifecycleMethod(pluginId, "environmentResumeLease")) {
+        || !pluginWorkerVerifiesLifecycleMethod(pluginId, "environmentResumeLease")
+        || (hasNativeWorkspaceExportResume(input.lease) && !pluginWorkerVerifiesLifecycleMethod(pluginId, "environmentStopLease"))) {
         throw new Error("The exact sandbox lease cannot be resumed by its verified provider.");
       }
       // This is a lifecycle resume, never acquisition: no replacement, host
@@ -3240,6 +3243,7 @@ function createSandboxEnvironmentDriver(
             providerLeaseId: input.lease.providerLeaseId,
             leaseMetadata: metadata,
             ...(input.cancelActiveWork ? { cancelActiveWork: true } : {}),
+            ...(input.resourceDisposition ? { resourceDisposition: input.resourceDisposition } : {}),
           }, resolvePluginSandboxRpcTimeoutMs(stripSandboxProviderEnvelope(config as SandboxEnvironmentConfig))),
         );
         termination = remoteTerminationReceipt(input.lease, receipt);
@@ -3923,7 +3927,8 @@ export function environmentRuntimeService(
         .where(
           and(
             eq(environmentLeases.heartbeatRunId, heartbeatRunId),
-            inArray(environmentLeases.status, ["active"]),
+            or(eq(environmentLeases.status, "active"), and(eq(environmentLeases.status, "pending_cleanup"),
+              sql`${environmentLeases.metadata} ? 'nativeWorkspaceExportResume'`)),
           ),
         );
       if (leaseRows.length === 0) {
@@ -3940,9 +3945,38 @@ export function environmentRuntimeService(
           const environment = leaseRow.environmentId
             ? await environmentsSvc.getById(leaseRow.environmentId)
             : null;
+          let leaseSnapshot = toEnvironmentLeaseSnapshot(leaseRow);
+          if (hasNativeWorkspaceExportResume(leaseSnapshot) && providerResourceDisposition === "destroy") {
+            const completed = await releaseCompletedNativeWorkspaceExportRetention(db, leaseSnapshot);
+            if (completed) leaseSnapshot = toEnvironmentLeaseSnapshot(completed);
+          }
+          if (hasNativeWorkspaceExportResume(leaseSnapshot)) {
+            const attemptId = randomUUID();
+            const [claimed] = await db.update(environmentLeases).set({
+              status: "pending_cleanup", cleanupStatus: "failed", releasedAt: new Date(),
+              metadata: sql`${environmentLeases.metadata} || ${JSON.stringify({ pendingCleanupAttemptId: attemptId,
+                pendingCleanupInFlight: true, pendingCleanupLeaseExpiresAtMs: Date.now() + 15 * 60_000 })}::jsonb`,
+            }).where(and(eq(environmentLeases.id, leaseRow.id), eq(environmentLeases.heartbeatRunId, heartbeatRunId),
+              inArray(environmentLeases.status, ["active", "pending_cleanup"]),
+              sql`coalesce(${environmentLeases.metadata}->>'pendingCleanupInFlight', 'false') = 'false'`,
+              sql`${environmentLeases.metadata}->'nativeWorkspaceExportResume' = ${JSON.stringify(leaseRow.metadata?.nativeWorkspaceExportResume)}::jsonb`,
+            )).returning();
+            if (!claimed) continue;
+            const snapshot = toEnvironmentLeaseSnapshot(claimed);
+            try {
+              const driver = requireDriverKey(getLeaseDriverKey(snapshot, environment));
+              if (!driver.retryPendingSandboxTeardown) throw new Error("Workspace export recovery requires stop-only cleanup.");
+              const receipt = await driver.retryPendingSandboxTeardown({ environment, lease: snapshot });
+              const lease = await settleNativeWorkspaceExportResume(db, snapshot, { attemptId, receipt });
+              if (lease && environment) released.push({ environment, lease: toEnvironmentLeaseSnapshot(lease),
+                leaseContext: { executionWorkspaceId: lease.executionWorkspaceId, executionWorkspaceMode: null } });
+            } catch (error) {
+              await settleNativeWorkspaceExportResume(db, snapshot, { attemptId });
+              throw error;
+            }
+            continue;
+          }
           if (!environment) continue;
-
-          const leaseSnapshot = toEnvironmentLeaseSnapshot(leaseRow);
           if (
             providerResourceDisposition === "keep_running" &&
             leaseSnapshot.leasePolicy === "reuse_by_environment"
@@ -3999,6 +4033,7 @@ export function environmentRuntimeService(
             : driver
               ? await driver.releaseRunLease({
                   ...(cancelActiveWork ? { cancelActiveWork: true } : {}),
+                  ...(providerResourceDisposition === "stop_and_retain" ? { resourceDisposition: "stop_and_retain" as const } : {}),
                   environment,
                   lease: leaseSnapshot,
                   // A stopped reusable provider resource must remain eligible
