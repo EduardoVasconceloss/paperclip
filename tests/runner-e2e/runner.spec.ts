@@ -832,7 +832,7 @@ for (const execution of executions) {
 
       if (execution.task.flow === "workspace_export_rejection") {
         const recovery = await runWorkspaceExportRejection({
-          page, api, fixtures, execution, nonce, workspacePath, deadlineAt: startedAtMs + deadlineMs - 60_000,
+          page, api, fixtures, execution, nonce, workspacePath, daytonaApiKey: credentials.DAYTONA_API_KEY, deadlineAt: startedAtMs + deadlineMs - 60_000,
           observe: (currentIssue, runs, checks) => {
             issue = currentIssue; selectedRuns = runs;
             matcherResults = checks.map(check => ({ matcher: { kind: "json_path" as const, path: `workspaceExport.${check.id}`, expected: true }, passed: check.passed, detail: check.detail }));

@@ -880,7 +880,7 @@ export const unsafeWorkspaceExportTask: RunnerTaskFixture = {
   groups: ["recovery"], workMode: "standard", flow: "workspace_export_rejection",
   expectedRunCount: 1,
   attemptTimeoutMs: { local: 10 * 60_000, daytona: 10 * 60_000 },
-  expectedTerminalState: { issue: "blocked", run: "failed" },
+  expectedTerminalState: { issue: "done", run: "succeeded" },
   buildTitle: nonce => `Runner E2E unsafe export ${nonce}`,
   buildVisibleMarker: nonce => `EXPORT-PRESERVED-${nonce}`,
   buildPrompt: nonce => [
@@ -892,8 +892,8 @@ export const unsafeWorkspaceExportTask: RunnerTaskFixture = {
     "Do not repair the deliberately invalid link, run package installation, use the network, create child tasks, or submit another provider turn.",
   ].join("\n"),
   buildMatchers: (_nonce, execution) => [
-    { kind: "issue_status", expected: "blocked" },
-    { kind: "run_status", expected: "failed" },
+    { kind: "issue_status", expected: "done" },
+    { kind: "run_status", expected: "succeeded" },
     { kind: "runtime_mode", expected: execution.profile.expectedRuntimeMode },
     { kind: "environment", expected: "daytona" },
   ],
@@ -938,10 +938,10 @@ const everydayProfiles = [
 export const runnerSuites: readonly RunnerSuiteFixture[] = [
   {
     id: "daytona-workspace-recovery", label: "Daytona workspace export recovery", manualOnly: true,
-    description: "One accepted native result survives a permanent unsafe export rejection without replay or automatic retry.",
+    description: "One accepted result survives unsafe export rejection and reaches Done after explicit sandbox repair, without provider replay.",
     groups: ["daytona", "native"], profiles: runnerProfiles.filter(profile => profile.id === "runner-codex"),
     environments: [daytonaWarmEnvironment], tasks: [unsafeWorkspaceExportTask], expectedMatrixSize: 1,
-    definitionMetadata: { version: 1, oracle: "first-failure-accepted-result-retained-sandbox", providerTurns: 1 },
+    definitionMetadata: { version: 2, oracle: "first-failure-then-export-only-repair", providerTurns: 1 },
   },
   {
     id: "continuation-accounting", label: "Continuation accounting baseline", manualOnly: true,

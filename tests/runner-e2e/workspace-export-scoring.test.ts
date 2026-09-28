@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { gradeWorkspaceExport, hasPermanentWorkspaceFailure, unsafeWorkspaceFailureCode, type WorkspaceExportObservation } from "./workspace-export-scoring.js";
+import { gradeRepairedWorkspaceExport, gradeWorkspaceExport, hasPermanentWorkspaceFailure, unsafeWorkspaceFailureCode, type WorkspaceExportObservation } from "./workspace-export-scoring.js";
 import { runnerMatrix, unsafeWorkspaceExportTask } from "./catalog.js";
 import { parseRunnerSelectors, selectRunnerExecutions } from "./selectors.js";
 function valid(): WorkspaceExportObservation {
@@ -53,5 +53,30 @@ describe("unsafe workspace export oracle", () => {
     expect(unsafeWorkspaceExportTask.expectedRunCount).toBe(1);
     expect(unsafeWorkspaceExportTask.buildPrompt("nonce")).toContain("/paperclip-e2e-nonexistent-nonce");
     expect(selectRunnerExecutions(parseRunnerSelectors(["--all"]), runnerMatrix).some(cell => cell.suite.id === "daytona-workspace-recovery")).toBe(false);
+  });
+});
+
+describe("repaired workspace export oracle", () => {
+  function fixture() {
+    const before = valid(), after = structuredClone(before);
+    after.issue.status = "done"; after.runs[0]!.status = "succeeded"; after.runs[0]!.nativePhase = "committed";
+    after.runs[0]!.resultJson = { ...after.runs[0]!.resultJson, finalizationPhase: "committed", failureCode: null, nextAttemptAt: null };
+    after.recovery.active = null;
+    return { before, after, hostSafeFileMatches: true };
+  }
+  it("requires the same saved result and provider turn through committed export", () => {
+    expect(gradeRepairedWorkspaceExport(fixture()).every(check => check.passed)).toBe(true);
+  });
+  it.each([
+    ["another accepted result", (s: ReturnType<typeof fixture>) => { s.after.events[0]!.payload.prpEvent.payload.result.summary = "replacement"; }],
+    ["provider replay on same run", (s: ReturnType<typeof fixture>) => { s.after.events.push({ payload: { prpEvent: { eventType: "turn.submitted", runId: "run-1" } } }); }],
+    ["new run", (s: ReturnType<typeof fixture>) => { s.after.runs.push({ id: "run-2" }); }],
+    ["host work lost", (s: ReturnType<typeof fixture>) => { s.hostSafeFileMatches = false; }],
+    ["retry still pending", (s: ReturnType<typeof fixture>) => { s.after.runs[0]!.resultJson.nextAttemptAt = "later"; }],
+    ["replaced sandbox", (s: ReturnType<typeof fixture>) => { s.after.leases[0]!.providerLeaseId = "new"; }],
+    ["sandbox never stopped", (s: ReturnType<typeof fixture>) => { s.after.leases[0]!.status = "active"; }],
+  ] as const)("rejects %s", (_label, mutate) => {
+    const state = fixture(); mutate(state);
+    expect(gradeRepairedWorkspaceExport(state).some(check => !check.passed)).toBe(true);
   });
 });

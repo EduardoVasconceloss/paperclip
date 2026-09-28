@@ -1055,10 +1055,16 @@ export failure on attempt one, a blocked task with board repair ownership and no
 retry, an exact stopped-sandbox receipt, and no escaped link on the host.
 
 The first failure is captured before an unfixed controller's scheduled retry.
-A successful fixed run retains the sandbox until the ordinary fixture teardown
-explicitly destroys it; no private state injection or extraction exception is
-used. Normal screenshot, secret scanning, billing and cleanup reporting apply.
+After preserving that rejection evidence, the fixture uses the official Daytona
+SDK to resume only the exact sandbox whose company/environment/run/create-attempt
+labels match the stopped lease. It verifies the safe file hash, removes only the
+known synthetic link, then clicks **Retry workspace export** in the browser. The
+second oracle requires the original accepted result and provider events unchanged,
+Done/committed, exact safe bytes on the host, and the same sandbox stopped again.
+Ordinary fixture teardown then destroys it; no private state injection or
+extraction exception is used. Normal screenshot, secret scanning, billing and cleanup reporting apply.
 Select this cell explicitly after credential-free checks and immutable image
 setup; `--all` excludes it. See `workspace-export.json` in the attempt snapshots
-for each independent assertion. Missing stop receipts or accepted-result
-evidence fail the cell.
+for each independent assertion; `workspace-export-rejected.json` preserves the
+first failure and `workspace-export-operator-repair.json` records the narrow repair.
+Missing stop receipts or accepted-result evidence fail the cell.

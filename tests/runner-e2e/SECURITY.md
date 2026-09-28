@@ -267,3 +267,10 @@ fresh sandbox. It never creates or follows that target, reads private files, or
 relaxes the host extraction guard. The host oracle uses `lstat` on the known
 workspace entry. The accepted result and provider stop receipt are read through
 normal public APIs; teardown deletes only the fixture's environment and leases.
+
+The explicit `daytona-workspace-recovery` cell exercises an operator repair with
+the official provider SDK. It verifies the exact company, environment, run and
+create-attempt labels plus the stopped lease before resuming the fixture sandbox.
+It removes only its known nonce symlink after checking the safe file hash, then
+uses the production browser action to retry export. SDK responses and credentials
+are excluded from evidence; no live non-fixture workspace is eligible.

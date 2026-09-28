@@ -45,3 +45,36 @@ export function gradeWorkspaceExport(observed: WorkspaceExportObservation) {
   ] as const;
   return checks.map(([id, passed, detail]) => ({ id, passed: Boolean(passed), detail }));
 }
+
+/** Independent after-repair evidence: no fresh turn can stand in for export recovery. */
+export function gradeRepairedWorkspaceExport(input: {
+  before: WorkspaceExportObservation; after: WorkspaceExportObservation; hostSafeFileMatches: boolean;
+}) {
+  const { before, after } = input;
+  const run = after.runs[0], prior = before.runs[0];
+  const envelopes = (state: WorkspaceExportObservation) => state.events.map(event => event.payload?.prpEvent).filter(Boolean);
+  const accepted = (state: WorkspaceExportObservation) => envelopes(state).filter(event => event.eventType === "run.result.accepted");
+  const providerEvents = (state: WorkspaceExportObservation) => envelopes(state).filter(event =>
+    ["session.started", "session.resumed", "session.reconciled", "turn.submitted", "turn.accepted", "run.terminal"].includes(event.eventType));
+  const lease = after.leases.find(value => value.id === before.leases[0]?.id);
+  const receipt = lease?.metadata?.remoteExecutionTermination;
+  const checks = [
+    ["repair-same-run", after.runs.length === 1 && !!prior?.id && run?.id === prior.id && run.runnerInstanceId === prior.runnerInstanceId,
+      "Repair commits the original native run without a successor"],
+    ["repair-same-result", accepted(before).length === 1 && JSON.stringify(accepted(after)) === JSON.stringify(accepted(before)),
+      "Exactly the same accepted result envelope survives the repair"],
+    ["repair-no-provider-replay", providerEvents(before).length > 0 && JSON.stringify(providerEvents(after)) === JSON.stringify(providerEvents(before)),
+      "Repair creates no new provider identity, turn, or terminal event"],
+    ["repair-committed", after.issue.status === "done" && run?.status === "succeeded" && run?.nativePhase === "committed"
+      && run.resultJson?.finalizationPhase === "committed" && !run.resultJson?.failureCode && !run.resultJson?.nextAttemptAt
+      && !after.issue.executionRunId && !after.issue.checkoutRunId && !after.issue.scheduledRetry && !after.recovery.active,
+      "The saved result reaches Done and committed with no remaining repair or retry"],
+    ["repair-safe-host-files", input.hostSafeFileMatches && after.hostLinkAbsent,
+      "The host receives exact safe bytes and no escaping link"],
+    ["repair-same-stopped-sandbox", !!lease && after.leases.length === before.leases.length && lease.providerLeaseId === before.leases[0]?.providerLeaseId
+      && lease.heartbeatRunId === prior?.id && lease.status === "released" && lease.cleanupStatus === "success"
+      && receipt?.state === "stopped" && receipt.runId === prior?.id && receipt.leaseId === lease.id && receipt.providerLeaseId === lease.providerLeaseId,
+      "The exact repair sandbox is stopped and retained again"],
+  ] as const;
+  return checks.map(([id, passed, detail]) => ({ id, passed: Boolean(passed), detail }));
+}

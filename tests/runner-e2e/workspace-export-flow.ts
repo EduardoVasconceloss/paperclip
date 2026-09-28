@@ -1,4 +1,5 @@
-import { lstat } from "node:fs/promises";
+import { repairFixtureWorkspaceExport } from "./workspace-export-repair.js";
+import { lstat, readFile } from "node:fs/promises";
 import path from "node:path";
 import { expect, type Page } from "@playwright/test";
 import { pollUntil, type RunnerApi } from "./api.js";
@@ -6,13 +7,13 @@ import { collectRunEvents } from "./run-observations.js";
 import { createTaskThroughUi } from "./user-actions.js";
 import type { LiveFixtureValues } from "./live-fixtures.js";
 import type { MatrixExecution } from "./types.js";
-import { gradeWorkspaceExport, hasPermanentWorkspaceFailure, type WorkspaceExportObservation } from "./workspace-export-scoring.js";
+import { gradeRepairedWorkspaceExport, gradeWorkspaceExport, hasPermanentWorkspaceFailure, type WorkspaceExportObservation } from "./workspace-export-scoring.js";
 
 type Row = Record<string, any>;
 export async function runWorkspaceExportRejection(input: {
   page: Page; api: RunnerApi; fixtures: LiveFixtureValues; execution: MatrixExecution;
-  nonce: string; workspacePath: string; deadlineAt: number;
-  observe(issue: any, runs: any[], checks: ReturnType<typeof gradeWorkspaceExport>): void;
+  nonce: string; daytonaApiKey?: string; workspacePath: string; deadlineAt: number;
+  observe(issue: any, runs: any[], checks: Array<{ id: string; passed: boolean; detail: string }>): void;
   capture(id: string, label: string, file: string): Promise<void>;
   evidence(name: string, value: unknown): Promise<void>;
 }) {
@@ -21,7 +22,9 @@ export async function runWorkspaceExportRejection(input: {
   let issue: Row | undefined;
   let runs: Row[] = [];
   let observed: WorkspaceExportObservation | undefined;
-  let checks: ReturnType<typeof gradeWorkspaceExport> = [];
+  let rejected: WorkspaceExportObservation | undefined;
+  let rejectionChecks: Array<{ id: string; passed: boolean; detail: string }> = [];
+  let checks: Array<{ id: string; passed: boolean; detail: string }> = [];
   async function load() {
     if (!issue) throw new Error("Workspace export task is missing");
     issue = await api.get<Row>(`/api/issues/${issue.id}`);
@@ -43,7 +46,8 @@ export async function runWorkspaceExportRejection(input: {
       throw error;
     });
     observed = { ...state, events, recovery, leases, hostLinkAbsent, marker: execution.task.buildVisibleMarker(nonce) };
-    checks = gradeWorkspaceExport(observed);
+    const hostSafeFileMatches = await readFile(path.join(input.workspacePath, `safe-work-${nonce}.txt`), "utf8").then(bytes => bytes === `PRESERVED-${nonce}\n`, () => false);
+    checks = rejected ? [...rejectionChecks, ...gradeRepairedWorkspaceExport({ before: rejected, after: observed, hostSafeFileMatches })] : gradeWorkspaceExport(observed);
     input.observe(state.issue, runs, checks);
     await input.evidence("workspace-export.json", { ...observed, checks });
     await input.evidence("api-state.json", { ...state, runEvents: events, recovery, leases });
@@ -74,7 +78,20 @@ export async function runWorkspaceExportRejection(input: {
       reject: () => checks.some(check => !check.passed) ? "Settled export evidence regressed" : undefined });
     await page.goto(`/${fixtures.company.issuePrefix}/issues/${issue.identifier ?? issue.id}`, { waitUntil: "domcontentloaded" });
     await expect(page.getByTestId("issue-detail-header").getByRole("button", { name: "Change status (current: Blocked" })).toBeVisible({ timeout: 30_000 });
-    await input.capture("final-state", "Unsafe export blocked with work retained", "final-state.png");
+    await input.capture("export-blocked", "Unsafe export blocked with work retained", "export-blocked.png");
+    rejected = structuredClone(observed!); rejectionChecks = [...checks];
+    await input.evidence("workspace-export-rejected.json", { ...rejected, checks: rejectionChecks });
+    const repair = await repairFixtureWorkspaceExport({ observed: rejected, companyId: fixtures.company.id,
+      environmentId: fixtures.environment.id, nonce, apiKey: input.daytonaApiKey });
+    await input.evidence("workspace-export-operator-repair.json", repair);
+    await page.getByLabel("Repair performed", { exact: true }).fill("Removed only the deliberately unsafe fixture symlink; verified the safe nonce file hash before and after repair.");
+    await page.getByRole("button", { name: "Retry workspace export", exact: true }).click();
+    await pollUntil({ label: "same accepted result committed after export repair", deadlineAt: input.deadlineAt,
+      load: snapshot, accept: () => checks.every(check => check.passed),
+      reject: state => state.runs.length !== 1 || state.runs[0]?.id !== rejected!.runs[0]?.id ? "Repair started another provider run" : undefined });
+    await page.reload({ waitUntil: "domcontentloaded" });
+    await expect(page.getByTestId("issue-detail-header").getByRole("button", { name: "Change status (current: Done" })).toBeVisible({ timeout: 30_000 });
+    await input.capture("final-state", "Original saved result completed after workspace repair", "final-state.png");
   } finally {
     if (issue) await snapshot();
   }
