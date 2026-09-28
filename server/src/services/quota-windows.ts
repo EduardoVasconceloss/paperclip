@@ -42,10 +42,34 @@ export async function fetchAllQuotaWindows(): Promise<ProviderQuotaResult[]> {
   });
 }
 
+type AccountQuotaResult = { name: string; result: ProviderQuotaResult };
+
+/**
+ * The Costs page shows one quota result per provider, so the accounts of one provider are folded into one
+ * result: windows of several successful accounts are labelled with the account name, and when none succeeds
+ * the errors of all of them are kept.
+ */
+function foldAccountQuotas(accounts: AccountQuotaResult[]): ProviderQuotaResult {
+  const ok = accounts.filter((account) => account.result.ok);
+  if (ok.length === 1) return ok[0]!.result;
+  if (ok.length > 1) {
+    return {
+      ...ok[0]!.result,
+      windows: ok.flatMap(({ name, result }) =>
+        result.windows.map((window) => ({ ...window, label: `${name} · ${window.label}` })),
+      ),
+    };
+  }
+  if (accounts.length === 1) return accounts[0]!.result;
+  return {
+    ...accounts[0]!.result,
+    error: accounts.map(({ name, result }) => `${name}: ${result.error ?? "unavailable"}`).join("; "),
+  };
+}
+
 /**
  * Adds the quota of the managed OpenAI subscription accounts the user may use in this company. Agents on
  * managed AI connections have no login in the server's own Codex home, so the local probe fails for them.
- * A successful managed result replaces a failed local one for the same provider.
  */
 export async function fetchCompanyQuotaWindows(
   db: Db,
@@ -57,20 +81,25 @@ export async function fetchCompanyQuotaWindows(
     aiConnectionService(db).subscriptionCredentials(companyId, userId, "openai"),
   ]);
   const managed = await Promise.all(
-    accounts.map((account) =>
-      withQuotaTimeout(
+    accounts.map(async (account): Promise<AccountQuotaResult> => ({
+      name: account.name,
+      result: await withQuotaTimeout(
         "codex_local",
         account.value().then(getQuotaWindowsForAuth, (error: unknown) => ({
           provider: "openai",
           ok: false,
-          error: `${account.name}: ${error instanceof Error ? error.message : String(error)}`,
+          error: error instanceof Error ? error.message : String(error),
           windows: [],
         })),
       ),
-    ),
+    })),
   );
-  const covered = new Set(managed.filter((r) => r.ok).map((r) => r.provider));
-  return [...local.filter((r) => r.ok || !covered.has(r.provider)), ...managed];
+  if (managed.length === 0) return local;
+  const openai = [
+    ...local.filter((r) => r.provider === "openai").map((result) => ({ name: "Local Codex login", result })),
+    ...managed,
+  ];
+  return [...local.filter((r) => r.provider !== "openai"), foldAccountQuotas(openai)];
 }
 
 async function withQuotaTimeout(

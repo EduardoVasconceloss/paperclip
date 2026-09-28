@@ -100,7 +100,31 @@ describe("fetchCompanyQuotaWindows", () => {
     ]);
   });
 
-  it("keeps the local result and names the account when its credential cannot be read", async () => {
+  it("names each account in one OpenAI result when several accounts report quota", async () => {
+    const localOk = { provider: "openai", source: "codex-rpc", ok: true, windows: [{ label: "5h limit", usedPercent: 9, resetsAt: null, valueLabel: null, detail: null }] };
+    vi.mocked(listServerAdapters).mockReturnValue([
+      { type: "codex_local", getQuotaWindows: vi.fn().mockResolvedValue(localOk) },
+    ] as never);
+    mockSubscriptionCredentials.mockResolvedValue([
+      { name: "Plus", value: async () => "plus" },
+      { name: "Pro", value: async () => "pro" },
+    ]);
+
+    const results = await fetchCompanyQuotaWindows({} as never, "company-1", "user-1");
+
+    expect(results).toEqual([
+      {
+        ...localOk,
+        windows: [
+          { ...localOk.windows[0], label: "Local Codex login · 5h limit" },
+          { label: "Plus · plus", usedPercent: 3, resetsAt: null, valueLabel: null, detail: null },
+          { label: "Pro · pro", usedPercent: 3, resetsAt: null, valueLabel: null, detail: null },
+        ],
+      },
+    ]);
+  });
+
+  it("returns one OpenAI error naming each account when no account reports quota", async () => {
     vi.mocked(listServerAdapters).mockReturnValue([
       { type: "codex_local", getQuotaWindows: vi.fn().mockResolvedValue(failedLocal) },
     ] as never);
@@ -111,8 +135,10 @@ describe("fetchCompanyQuotaWindows", () => {
     const results = await fetchCompanyQuotaWindows({} as never, "company-1", "user-1");
 
     expect(results).toEqual([
-      failedLocal,
-      { provider: "openai", ok: false, error: "My OpenAI subscription: Reconnect this AI account", windows: [] },
+      {
+        ...failedLocal,
+        error: "Local Codex login: no local codex auth token; My OpenAI subscription: Reconnect this AI account",
+      },
     ]);
   });
 });

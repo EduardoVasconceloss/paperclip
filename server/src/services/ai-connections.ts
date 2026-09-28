@@ -393,6 +393,9 @@ export function aiConnectionService(db: Db) {
           grant.status === "active" &&
           connection.enabled &&
           connection.status === "active" &&
+          // Same availability rules select() applies to agent runs.
+          connection.healthStatus === "ok" &&
+          !aiSubscriptionNeedsIsolatedLogin(connection.config) &&
           canUseCredential(grant, userId, members.filter((m) => m.grantId === grant.id))
         );
       })
