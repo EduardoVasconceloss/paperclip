@@ -9,7 +9,7 @@ import type { InlineEntityOption } from "@/components/InlineEntitySelector";
 import { Dialog, DialogClose, DialogContent, DialogTitle, DialogTrigger } from "@/components/ui/dialog";
 import { Popover, PopoverContent, PopoverTrigger } from "@/components/ui/popover";
 import {
-  composerEfforts, composerFastAvailable, DEFAULT_COMPOSER_RUN_SETTINGS,
+  composerCatalogProvider, composerEfforts, composerFastAvailable, DEFAULT_COMPOSER_RUN_SETTINGS,
   EFFORT_LABELS, readComposerRunSettings, supportsComposerModel,
   type ComposerRunSettings,
 } from "./composer-run-settings";
@@ -69,8 +69,7 @@ export function ComposerRunSettingsPicker({
   const agentId = assigneeValue.startsWith("agent:") ? assigneeValue.slice(6) : "";
   const agent = agents.get(agentId);
   const modelSupported = supportsComposerModel(agent);
-  const provider = agent?.adapterType === "paperclip_runner"
-    ? String(agent.adapterConfig.provider ?? "codex") : undefined;
+  const provider = composerCatalogProvider(agent);
   const { data: fetchedModels = [], isPending: modelsPending } = useQuery({
     queryKey: agent && modelSupported
       ? queryKeys.agents.adapterModels(companyId, agent.adapterType, agent.defaultEnvironmentId ?? null, provider)
@@ -102,7 +101,8 @@ export function ComposerRunSettingsPicker({
   const exactMatch = models.some((item) => item.id.toLowerCase() === query.toLowerCase());
   const needsProvider = agent && ["opencode_local", "pi_local", "kimi_local"].includes(agent.adapterType);
   const manualValid = query.length > 0 && !/\s/.test(query)
-    && (!needsProvider || /^[^/]+\/.+[^/]$/.test(query));
+    && (!needsProvider || /^[^/]+\/.+[^/]$/.test(query))
+    && (provider !== "openrouter" || /^openrouter\/[^/]+\/.+[^/]$/.test(query));
 
   useEffect(() => {
     setView("settings");

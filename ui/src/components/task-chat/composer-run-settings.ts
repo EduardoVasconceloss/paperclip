@@ -1,6 +1,6 @@
 import { codexLocalReasoningEffortsForModel, isCodexLocalFastModeSupported, isCodexLocalKnownModel } from "@paperclipai/adapter-codex-local";
 import { modelSupportsEffort, KIMI_SUPPORTED_EFFORTS } from "@paperclipai/adapter-kimi-local";
-import type { Agent, IssueAssigneeAdapterOverrides } from "@paperclipai/shared";
+import { aiConnectionBindingSchema, type Agent, type IssueAssigneeAdapterOverrides } from "@paperclipai/shared";
 
 export interface ComposerRunSettings {
   model: string | null;
@@ -21,6 +21,16 @@ const MODEL_ADAPTERS = new Set([
 
 export function supportsComposerModel(agent: Agent | undefined): boolean {
   return Boolean(agent && MODEL_ADAPTERS.has(agent.adapterType));
+}
+
+export function composerCatalogProvider(agent: Agent | undefined): string | undefined {
+  if (!agent) return undefined;
+  if (agent.adapterType === "paperclip_runner") return String(agent.adapterConfig.provider ?? "codex");
+  if (agent.adapterType !== "opencode_local") return undefined;
+  const binding = aiConnectionBindingSchema.safeParse(agent.runtimeConfig?.aiConnection).data;
+  const configuredModel = agent.adapterConfig.model;
+  return binding?.provider === "openrouter" || typeof configuredModel === "string" && configuredModel.startsWith("openrouter/")
+    ? "openrouter" : undefined;
 }
 
 export function composerEfforts(agent: Agent | undefined, model: string, catalogIds: readonly string[]): readonly string[] {

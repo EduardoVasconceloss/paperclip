@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import type { Agent } from "@paperclipai/shared";
 import {
-  composerEfforts, composerFastAvailable, mergeComposerRunSettings,
+  composerCatalogProvider, composerEfforts, composerFastAvailable, mergeComposerRunSettings,
   readComposerRunSettings, supportsComposerModel,
 } from "./composer-run-settings";
 
@@ -19,6 +19,7 @@ describe("composer run settings", () => {
     expect(composerFastAvailable(agent("codex_local"), "gpt-6-astra")).toBe(true);
     expect(composerFastAvailable(agent("codex_local"), "custom-private-model")).toBe(false);
     expect(supportsComposerModel(agent("process"))).toBe(false);
+    expect(composerCatalogProvider({ ...agent("opencode_local"), adapterConfig: { model: "openrouter/qwen/qwen3-coder-next" } })).toBe("openrouter");
   });
 
   it("preserves unrelated task overrides while changing or resetting run settings", () => {
