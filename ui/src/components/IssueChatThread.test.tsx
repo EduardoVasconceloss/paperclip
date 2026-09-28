@@ -15,7 +15,7 @@ import { MemoryRouter } from "react-router-dom";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import type { Agent } from "@paperclipai/shared";
 import { CommentSubmissionUnknownError } from "../lib/comment-submit-result";
-import { settleDraftSubmission } from "../lib/composer-draft";
+import { loadDraft, preserveDraftInTab, settleDraftSubmission } from "../lib/composer-draft";
 import {
   IssueAssigneePausedNotice,
   IssueChatThread,
@@ -380,6 +380,7 @@ describe("IssueChatThread", () => {
     document.body.appendChild(container);
     window.scrollTo = vi.fn();
     localStorage.clear();
+    sessionStorage.clear();
   });
 
   afterEach(() => {
@@ -3380,44 +3381,99 @@ describe("IssueChatThread", () => {
     },
   );
 
-  it.each(["settled", "newer attempt"])("adopts another tab's draft after %s without overwriting it", async (outcome) => {
-    const key = "cross-tab-settled-submission";
-    const attemptId = "aaf8228f-0be7-45ae-a104-6fbe0af6f1d3";
-    localStorage.setItem(key, "Earlier message\n\nThis tab's next draft");
-    localStorage.setItem(`${key}:submission:v1`, JSON.stringify({ version: 1, draftKey: key, attemptId, reviewed: false, nextDraftOffset: 17, submittedAttachmentIds: [] }));
-    const root = createRoot(container);
-    const element = (confirmed: boolean) => (
-      <MemoryRouter>
-        <IssueChatThread
-          comments={confirmed ? [{ ...issueChatLongThreadComments[0]!, id: "confirmed-cross-tab-comment", body: "Earlier message", authorAgentId: null, authorUserId: "user-1", clientRequestId: attemptId }] : []}
-          currentUserId="user-1" linkedRuns={[]} timelineEvents={[]} liveRuns={[]}
-          onAdd={async () => {}} draftKey={key} enableLiveTranscriptPolling={false}
-        />
-      </MemoryRouter>
-    );
-    try {
-      await act(async () => root.render(element(false)));
-      expect(settleDraftSubmission(key, attemptId, "Newer text saved by another tab")).toBe(true);
+  it.each(["newer local text", "foreign pending receipt", "matching text with new attachments", "matching full text with new attachments", "own receipt with newer stored text", "unavailable recovery storage"])(
+    "preserves both tabs through settlement and reload: %s",
+    async (scenario) => {
+      const key = `cross-tab-preserved-${scenario}`;
+      const attemptId = "aaf8228f-0be7-45ae-a104-6fbe0af6f1d3";
       const newerId = "baf8228f-0be7-45ae-a104-6fbe0af6f1d3";
-      if (outcome === "newer attempt") localStorage.setItem(`${key}:submission:v1`, JSON.stringify({ version: 1, draftKey: key, attemptId: newerId, reviewed: false }));
       const attachmentId = "caf8228f-0be7-45ae-a104-6fbe0af6f1d3";
-      localStorage.setItem(`${key}:attachments:v1`, JSON.stringify({ version: 1, draftKey: key, attachments: [{ attachmentId, name: "another-tab.txt", inline: false, contentPath: `/api/attachments/${attachmentId}/content` }] }));
-      await act(async () => root.render(element(true)));
-      expect(container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Issue chat editor"]')!.value).toBe("Newer text saved by another tab");
-      if (outcome === "settled") {
+      const localText = "This tab's newer unsent draft";
+      const otherText = scenario === "matching text with new attachments" ? localText : scenario === "matching full text with new attachments" ? `Earlier message\n\n${localText}` : "The other tab's unsent draft";
+      localStorage.setItem(key, `Earlier message\n\n${localText}`);
+      localStorage.setItem(`${key}:submission:v1`, JSON.stringify({ version: 1, draftKey: key, attemptId, reviewed: false, nextDraftOffset: 17, submittedAttachmentIds: [] }));
+      const element = (confirmed: boolean, foreignConfirmed = false) => (
+        <MemoryRouter>
+          <IssueChatThread
+            comments={confirmed ? [
+              { ...issueChatLongThreadComments[0]!, id: "confirmed-cross-tab-comment", body: "Earlier message", authorAgentId: null, authorUserId: "user-1", clientRequestId: attemptId },
+              ...(foreignConfirmed ? [{ ...issueChatLongThreadComments[0]!, id: "other-tab-confirmed", body: "Other tab message", authorAgentId: null, authorUserId: "user-1", clientRequestId: newerId }] : []),
+            ] : []}
+            currentUserId="user-1" linkedRuns={[]} timelineEvents={[]} liveRuns={[]}
+            onAdd={async () => {}} draftKey={key} enableLiveTranscriptPolling={false}
+          />
+        </MemoryRouter>
+      );
+      let root = createRoot(container);
+      const recoveryWrite = scenario === "unavailable recovery storage"
+        ? vi.spyOn(Object.getPrototypeOf(sessionStorage), "setItem").mockImplementation(() => { throw new Error("Storage full"); })
+        : null;
+      try {
+        await act(async () => root.render(element(false)));
+        if (scenario === "own receipt with newer stored text") localStorage.setItem(key, `Earlier message\n\n${otherText}`);
+        else expect(settleDraftSubmission(key, attemptId, otherText)).toBe(true);
+        if (scenario === "foreign pending receipt") localStorage.setItem(`${key}:submission:v1`, JSON.stringify({ version: 1, draftKey: key, attemptId: newerId, reviewed: false, nextDraftOffset: 0, submittedAttachmentIds: [] }));
+        localStorage.setItem(`${key}:attachments:v1`, JSON.stringify({ version: 1, draftKey: key, attachments: [{ attachmentId, name: "another-tab.txt", inline: false, contentPath: `/api/attachments/${attachmentId}/content` }] }));
+        await act(async () => root.render(element(true)));
+        const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Issue chat editor"]')!;
+        expect(editor().value).toBe(localText);
         expect(container.textContent).not.toContain("We couldn’t confirm");
-        expect(localStorage.getItem(`${key}:submission:v1`)).toBeNull();
-      } else {
-        expect(container.textContent).toContain("We couldn’t confirm");
-        expect(localStorage.getItem(`${key}:submission:v1`)).toContain(newerId);
+        if (scenario === "unavailable recovery storage") expect(container.textContent).toContain("copy your text before leaving");
+        if (scenario.includes("with new attachments")) expect(container.textContent).toContain("another-tab.txt");
+        if (scenario === "foreign pending receipt") {
+          localStorage.setItem(key, "The owning tab kept typing after the first receipt");
+          await act(async () => root.render(element(true, true)));
+          expect(localStorage.getItem(`${key}:submission:v1`)).toContain(newerId);
+        } else expect(localStorage.getItem(`${key}:submission:v1`)).toBeNull();
+        const storedText = localStorage.getItem(key);
+        expect(storedText).toBe(scenario === "foreign pending receipt" ? "The owning tab kept typing after the first receipt" : otherText);
+        expect(localStorage.getItem(`${key}:attachments:v1`)).toContain(attachmentId);
+        await act(async () => root.unmount());
+        expect(localStorage.getItem(key)).toBe(storedText);
+        if (scenario === "unavailable recovery storage") return;
+        root = createRoot(container);
+        await act(async () => root.render(element(true, true)));
+        expect(editor().value).toBe(localText);
+        if (scenario.includes("with new attachments")) expect(container.textContent).toContain("another-tab.txt");
+        expect(localStorage.getItem(key)).toBe(storedText);
+        expect(localStorage.getItem(`${key}:attachments:v1`)).toContain(attachmentId);
+      } finally {
+        if (container.childNodes.length) await act(async () => root.unmount());
+        recoveryWrite?.mockRestore();
       }
-      expect(container.textContent).toContain("another-tab.txt");
-      expect(localStorage.getItem(`${key}:attachments:v1`)).toContain(attachmentId);
-      expect(localStorage.getItem(key)).toBe("Newer text saved by another tab");
-    } finally {
-      await act(async () => root.unmount());
-    }
-    expect(localStorage.getItem(key)).toBe("Newer text saved by another tab");
+    },
+  );
+
+  it.each(["ordinary", "recovered"])("preserves %s drafts when the same composer switches A to B to A before debounce", async (kind) => {
+    vi.useFakeTimers();
+    const a = `navigation-a-${kind}`;
+    const b = `navigation-b-${kind}`;
+    const keys = kind === "recovered"
+      ? [preserveDraftInTab(a, "Draft A", []).key, preserveDraftInTab(b, "Draft B", []).key]
+      : [a, b];
+    if (kind === "ordinary") { localStorage.setItem(a, "Draft A"); localStorage.setItem(b, "Draft B"); }
+    const root = createRoot(container);
+    const element = (draftKey: string) => (
+      <MemoryRouter><IssueChatThread comments={[]} linkedRuns={[]} timelineEvents={[]} liveRuns={[]}
+        onAdd={async () => {}} draftKey={draftKey} enableLiveTranscriptPolling={false} /></MemoryRouter>
+    );
+    const editor = () => container.querySelector<HTMLTextAreaElement>('textarea[aria-label="Issue chat editor"]')!;
+    const type = (value: string) => act(() => {
+      Object.getOwnPropertyDescriptor(window.HTMLTextAreaElement.prototype, "value")!.set!.call(editor(), value);
+      editor().dispatchEvent(new Event("input", { bubbles: true }));
+    });
+    try {
+      await act(async () => root.render(element(a)));
+      expect(editor().value).toBe("Draft A");
+      type("Draft A typed just now");
+      await act(async () => root.render(element(b)));
+      expect(editor().value).toBe("Draft B");
+      expect(loadDraft(keys[0]!)).toBe("Draft A typed just now");
+      type("Draft B typed just now");
+      await act(async () => root.render(element(a)));
+      expect(editor().value).toBe("Draft A typed just now");
+      expect(loadDraft(keys[1]!)).toBe("Draft B typed just now");
+    } finally { await act(async () => root.unmount()); }
   });
 
   it("stores and restores the composer draft per issue key", () => {

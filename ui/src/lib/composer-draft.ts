@@ -30,6 +30,27 @@ export function loadDraftIfAvailable(draftKey: string): string | null {
   }
 }
 
+/** A conflicting tab keeps its own recoverable buffer without replacing the
+ * shared draft or acquiring another tab's pending receipt. */
+export function loadDraftRecoveryKey(draftKey: string): string | null {
+  const key = `paperclip:agent-chat-draft:recovered:${draftKey}`;
+  try {
+    return sessionStorage.getItem(`${key}:recovery:v1`) === draftKey ? key : null;
+  } catch { return null; }
+}
+
+export function preserveDraftInTab(draftKey: string, body: string, attachments: unknown): { key: string; persisted: boolean } {
+  const key = `paperclip:agent-chat-draft:recovered:${draftKey}`;
+  try {
+    sessionStorage.setItem(key, body);
+    sessionStorage.setItem(`${key}:attachments:v1`, JSON.stringify({ version: 1, draftKey: key, attachments: draftAttachments(attachments) }));
+    sessionStorage.setItem(`${key}:recovery:v1`, draftKey);
+    return { key, persisted: true };
+  } catch {
+    return { key, persisted: false };
+  }
+}
+
 function mayWriteDraft(draftKey: string, attemptId?: string) {
   const pending = loadDraftSubmission(draftKey);
   return !pending || pending.attemptId === attemptId;
