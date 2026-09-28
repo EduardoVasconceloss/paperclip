@@ -62,6 +62,7 @@ export type RecoveryDisplayInput = Pick<
       | "attemptCount"
       | "maxAttempts"
       | "timeoutAt"
+      | "nativeRunActivity"
     >
   >;
 
@@ -83,6 +84,7 @@ export function deriveRecoveryDisplayState(
     attemptCount: action.attemptCount,
     maxAttempts: action.maxAttempts,
     timeoutAt: action.timeoutAt,
+    nativeRunActivity: action.nativeRunActivity,
   }, context);
   if (action.kind === "active_run_watchdog") {
     // Native finalization shares the watchdog kind, but resumes a failed

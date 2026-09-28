@@ -1464,3 +1464,16 @@ that an agent turn is running. Task and inbox surfaces show recovery in progress
 only while its recorded retry is still due or its matching retry run is verified
 live. An expired or missing retry, exhausted budget, or board-owned failure shows
 recovery needed rather than “Observing active run.”
+
+Native recovery reads include a read-only `nativeRunActivity` projection, bound
+to the company, source issue, and exact `resume_native_run.runId`. It reports a
+queued/running native heartbeat, or a running `workspace_finalize` operation
+owned by `native_workspace_finalizer`. The latter remains authoritative while
+the original heartbeat still records its previous failure. Completed operations,
+unrelated runs, and other companies do not establish activity. These retries do
+not require or synthesize a legacy `scheduledRetryReason`.
+
+The card describes recovery of the existing run. It does not describe a fresh
+owner disposition turn. This also covers native bootstrap/session recovery,
+which shares the same resume policy. Inbox rows, source cards, and blocker chips
+use the same activity projection and keep board-owned repairs actionable.

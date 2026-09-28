@@ -903,6 +903,13 @@ function formatTimeAbsolute(value: string | Date | null | undefined): string | n
  * the deliverable.
  */
 function lineageHeadline(lineage: RecoveryRetryLineage): string {
+  if (lineage.lane === "native_run") {
+    if (lineage.exhausted) return "Paperclip could not recover the existing run within its retry budget. Review the recorded failure before retrying. The task stays with its original owner.";
+    if (lineage.liveRunId) return "Paperclip is recovering the existing run. The task stays with its original owner.";
+    if (lineage.retryExpired) return "The retry for the existing run came due and did not start. Review the recorded failure and retry when ready. The task stays with its original owner.";
+    if (lineage.nextRetryAt) return "Paperclip has scheduled another attempt to resume the existing run. The task stays with its original owner.";
+    return "The existing run still needs recovery. Review the recorded failure before retrying. The task stays with its original owner.";
+  }
   // An attempt that came due and never ran leaves nobody working on this task, even though
   // attempts remain on paper. Say so before any lane wording that ends in "no action needed".
   if (lineage.retryExpired) {
@@ -1177,7 +1184,12 @@ export function IssueRecoveryActionCard({
                 className="inline-flex flex-wrap items-center gap-1.5"
                 data-testid="recovery-recovery-owner"
               >
-                {recoveryOwnerIsSourceOwner ? (
+                {lineage.lane === "native_run" && action.ownerType !== "board" ? (
+                  <>
+                    <span className="font-medium">Paperclip</span>
+                    <span className="text-muted-foreground">recovers the existing run</span>
+                  </>
+                ) : recoveryOwnerIsSourceOwner ? (
                   <span className="font-medium">Original owner — retrying itself</span>
                 ) : action.ownerType === "agent" && action.ownerAgentId ? (
                   <>

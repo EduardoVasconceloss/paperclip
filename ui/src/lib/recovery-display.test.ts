@@ -147,12 +147,20 @@ describe("deriveRecoveryDisplayState", () => {
       }, { now })).toBe("in_progress");
     });
 
-    it("recognizes only the matching verified run for an overdue retry", () => {
+    it.each(["queued", "running"] as const)("uses the API's %s finalization projection without a scheduled retry", (status) => {
+      expect(deriveRecoveryDisplayState({
+        ...action,
+        nativeRunActivity: { runId: "finalizing-run", status, workspaceOperationId: null },
+      }, { now })).toBe("in_progress");
+      expect(deriveRecoveryDisplayState({
+        ...action,
+        nativeRunActivity: { runId: "different-run", status, workspaceOperationId: null },
+      }, { now })).toBe("needed");
+    });
+
+    it("does not borrow an unrelated legacy retry to claim native finalization activity", () => {
       expect(deriveRecoveryDisplayState(action, {
         now, scheduledRetry: { runId: "finalizing-run", status: "running" },
-      })).toBe("in_progress");
-      expect(deriveRecoveryDisplayState(action, {
-        now, scheduledRetry: { runId: "different-run", status: "running" },
       })).toBe("needed");
     });
 

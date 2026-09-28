@@ -19,6 +19,7 @@ import {
   issueRecoveryActions,
   issueRelations,
   issueThreadInteractions,
+  workspaceOperations,
   issues,
 } from "@paperclipai/db";
 import {
@@ -139,6 +140,7 @@ describeEmbeddedPostgres("issue recovery actions", () => {
   }, 30_000);
 
   afterEach(async () => {
+    await db.delete(workspaceOperations);
     await db.delete(issueThreadInteractions);
     await db.delete(issueRecoveryActions);
     await db.delete(issueComments);
@@ -242,6 +244,91 @@ describeEmbeddedPostgres("issue recovery actions", () => {
     app.use(errorHandler);
     return app;
   }
+
+  async function seedNativeFinalizationRecovery(status: string) {
+    const fixture = await seedCompany();
+    const runId = randomUUID();
+    await db.insert(heartbeatRuns).values({
+      id: runId,
+      companyId: fixture.companyId,
+      agentId: fixture.coderId,
+      status,
+      runtimeMode: "native",
+      nativeIssueId: fixture.sourceIssueId,
+      nativePhase: "finalizing",
+      // Native coordinator retries resume this original run, without creating
+      // the legacy scheduled_retry_reason projection.
+      scheduledRetryReason: null,
+      contextSnapshot: { issueId: fixture.sourceIssueId },
+    });
+    const svc = issueRecoveryActionService(db);
+    await svc.upsertSourceScoped({
+      companyId: fixture.companyId,
+      sourceIssueId: fixture.sourceIssueId,
+      kind: "active_run_watchdog",
+      ownerType: "agent",
+      ownerAgentId: fixture.coderId,
+      cause: "native_finalization_invalid",
+      fingerprint: `native:${runId}`,
+      nextAction: "Finish the existing run.",
+      wakePolicy: { kind: "resume_native_run", runId, notBefore: "2020-01-01T00:00:00Z" },
+      maxAttempts: 3,
+    });
+    return { ...fixture, runId, svc };
+  }
+
+  it.each(["queued", "running"])("projects the exact %s native run without a legacy scheduled retry", async (status) => {
+    const { companyId, sourceIssueId, runId, svc } = await seedNativeFinalizationRecovery(status);
+    const expected = { runId, status, workspaceOperationId: null };
+    expect((await svc.getActiveForIssue(companyId, sourceIssueId))?.nativeRunActivity).toEqual(expected);
+    expect((await svc.listActiveForIssues(companyId, [sourceIssueId])).get(sourceIssueId)?.nativeRunActivity).toEqual(expected);
+    const response = await request(createApp()).get(`/api/issues/${sourceIssueId}`).expect(200);
+    expect(response.body.scheduledRetry).toBeNull();
+    expect(response.body.activeRecoveryAction.nativeRunActivity).toEqual(expected);
+  });
+
+  it("projects running export work while its original heartbeat remains failed, then clears it", async () => {
+    const { companyId, sourceIssueId, runId, svc } = await seedNativeFinalizationRecovery("failed");
+    const [operation] = await db.insert(workspaceOperations).values({
+      companyId, issueId: sourceIssueId, heartbeatRunId: runId,
+      phase: "workspace_finalize", status: "running",
+      metadata: { owningService: "native_workspace_finalizer" },
+    }).returning();
+    expect((await svc.getActiveForIssue(companyId, sourceIssueId))?.nativeRunActivity).toEqual({
+      runId, status: "running", workspaceOperationId: operation!.id,
+    });
+    await db.update(workspaceOperations).set({ status: "succeeded", finishedAt: new Date() }).where(eq(workspaceOperations.id, operation!.id));
+    expect((await svc.getActiveForIssue(companyId, sourceIssueId))?.nativeRunActivity).toBeNull();
+  });
+
+  it.each(["company", "issue", "legacy", "finished"])("rejects an apparently live run with the wrong %s authority", async (mismatch) => {
+    const { companyId, sourceIssueId, runId, svc } = await seedNativeFinalizationRecovery("running");
+    const other = await seedCompany();
+    await db.update(heartbeatRuns).set({
+      ...(mismatch === "company" ? { companyId: other.companyId, agentId: other.coderId } : {}),
+      ...(mismatch === "issue" ? { nativeIssueId: other.sourceIssueId } : {}),
+      ...(mismatch === "legacy" ? { runtimeMode: "legacy" } : {}),
+      ...(mismatch === "finished" ? { finishedAt: new Date() } : {}),
+    }).where(eq(heartbeatRuns.id, runId));
+    expect((await svc.getActiveForIssue(companyId, sourceIssueId))?.nativeRunActivity).toBeNull();
+  });
+
+  it.each(["company", "issue", "run", "phase", "owner", "finished"])(
+    "does not borrow native finalization activity with a different %s binding", async (mismatch) => {
+      const { companyId, sourceIssueId, runId, svc } = await seedNativeFinalizationRecovery("failed");
+      const other = await seedNativeFinalizationRecovery("running");
+      await db.insert(workspaceOperations).values({
+        companyId: mismatch === "company" ? other.companyId : companyId,
+        issueId: mismatch === "issue" ? other.sourceIssueId : sourceIssueId,
+        heartbeatRunId: mismatch === "run" ? other.runId : runId,
+        phase: mismatch === "phase" ? "workspace_prepare" : "workspace_finalize",
+        status: "running", finishedAt: mismatch === "finished" ? new Date() : null,
+        metadata: { owningService: mismatch === "owner" ? "different_service" : "native_workspace_finalizer" },
+      });
+      expect((await svc.getActiveForIssue(companyId, sourceIssueId))?.nativeRunActivity).toBeNull();
+      expect((await svc.listActiveForIssues(companyId, [sourceIssueId, other.sourceIssueId])).get(sourceIssueId)?.nativeRunActivity).toBeNull();
+    },
+  );
 
   it("upserts one active source-scoped action per issue and keeps company scoping explicit", async () => {
     const { companyId, managerId, sourceIssueId } = await seedCompany();
