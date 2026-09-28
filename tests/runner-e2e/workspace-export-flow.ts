@@ -85,7 +85,12 @@ export async function runWorkspaceExportRejection(input: {
       environmentId: fixtures.environment.id, nonce, apiKey: input.daytonaApiKey });
     await input.evidence("workspace-export-operator-repair.json", repair);
     await page.getByLabel("Repair performed", { exact: true }).fill("Removed only the deliberately unsafe fixture symlink; verified the safe nonce file hash before and after repair.");
+    const admissionResponse = page.waitForResponse(response => response.request().method() === "POST"
+      && response.url().endsWith(`/api/issues/${issue!.id}/recovery-actions/retry-workspace-export`));
     await page.getByRole("button", { name: "Retry workspace export", exact: true }).click();
+    const admission = await admissionResponse;
+    await input.evidence("workspace-export-admission.json", { status: admission.status(), body: await admission.json() });
+    expect(admission.status(), "The repaired retained sandbox must admit export-only retry").toBe(202);
     await pollUntil({ label: "same accepted result committed after export repair", deadlineAt: input.deadlineAt,
       load: snapshot, accept: () => checks.every(check => check.passed),
       reject: state => state.runs.length !== 1 || state.runs[0]?.id !== rejected!.runs[0]?.id ? "Repair started another provider run" : undefined });

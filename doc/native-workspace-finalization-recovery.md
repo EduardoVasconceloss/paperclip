@@ -97,7 +97,11 @@ A board member with runtime management access can complete the saved result:
 Admission requires the same accepted result, task owner, descriptor, and lease;
 confirmed prior provider stop; an available repaired sandbox; and no newer task
 execution or competing current lease. It shares finalization ownership and
-revalidates after probing the sandbox. A changed binding or unavailable sandbox
+resumes only the recorded provider lease through its verified lifecycle method.
+That method drains old activity and verifies the saved workspace identity before
+reopening the provider's controller admission gate; an external console restart
+alone does not reopen that gate. Admission rejects a missing or replacement
+sandbox and revalidates after probing the exact workspace. A changed binding or unavailable sandbox
 returns `409` without reopening work. A duplicate queued request is idempotent.
 An export that is still unsafe creates another explicit repair hold. Generic
 recovery's **Retry source task** does not substitute for export-only retry.

@@ -5015,6 +5015,28 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     });
   });
 
+  it("resumes only the exact stopped sandbox lifecycle without acquiring or reseeding", async () => {
+    const seeded = await seedReusablePluginSandboxLease("paperclip_runner");
+    await environmentService(db).releaseLease(seeded.reusableLease.id, "released", { cleanupStatus: "success" });
+    const lease = (await environmentService(db).getLeaseById(seeded.reusableLease.id))!;
+    const call = vi.fn(async (_id: string, method: string) => {
+      if (method !== "environmentResumeLease") throw new Error("Only exact resume is permitted");
+      return { providerLeaseId: lease.providerLeaseId, metadata: { remoteCwd: "/workspace" } };
+    });
+    const workerManager = { isRunning: () => true, call,
+      getWorker: () => ({ supportedMethods: ["environmentResumeLease", "environmentReleaseLease", "environmentDestroyLease"] }),
+    } as unknown as PluginWorkerManager;
+    const runtime = environmentRuntimeService(db, { pluginWorkerManager: workerManager });
+    await expect(runtime.resumeRunLease({ environment: seeded.environment, lease })).resolves.toMatchObject({ providerLeaseId: lease.providerLeaseId });
+    expect(call).toHaveBeenCalledOnce();
+    expect(call).toHaveBeenCalledWith(seeded.pluginId, "environmentResumeLease", expect.objectContaining({
+      companyId: seeded.companyId, environmentId: seeded.environment.id, providerLeaseId: lease.providerLeaseId,
+      leaseMetadata: lease.metadata,
+    }), expect.any(Number));
+    expect((await environmentService(db).getLeaseById(lease.id))?.status).toBe("released");
+    expect(await db.select().from(environmentLeases)).toHaveLength(1);
+  });
+
   it("does not allocate a native-runner replacement without a verified backup", async () => {
     const seeded = await seedReusablePluginSandboxLease("paperclip_runner");
     const workerManager = {

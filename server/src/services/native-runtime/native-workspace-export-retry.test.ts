@@ -35,7 +35,7 @@ describe("board retry of accepted workspace export", () => {
     const identity = { id: leaseId, companyId, heartbeatRunId: runId, provider: "daytona", providerLeaseId };
     await db.insert(environmentLeases).values({ ...identity, environmentId, issueId, status: "released", releasedAt: new Date(), cleanupStatus: "success", leasePolicy: "reuse_by_environment", metadata: { remoteExecutionTermination: remoteTerminationReceipt(identity, { providerLeaseId, state: "stopped" }) } });
     await db.insert(issueRecoveryActions).values({ id: actionId, companyId, sourceIssueId: issueId, kind: "active_run_watchdog", ownerType: "board", returnOwnerAgentId: agentId, cause: "native_workspace_sync_out_unsafe_archive", fingerprint: runId, evidence: { runId }, nextAction: "Repair saved files" });
-    const request = { db, companyId, issueId, actionId, runId, actorId: "board", repairNote: "Removed only the known unsafe fixture link and preserved the saved work.", environmentRuntime: {} as never };
+    const request = { db, companyId, issueId, actionId, runId, actorId: "board", repairNote: "Removed only the known unsafe fixture link and preserved the saved work.", environmentRuntime: { resumeRunLease: vi.fn().mockResolvedValue({ providerLeaseId, metadata: { remoteCwd: "/work" } }) } as never };
     return { ...request, request, resultId, leaseId };
   }
   it("queues only the existing result and lease, audits once, and deduplicates a pending click", async () => {
@@ -51,6 +51,26 @@ describe("board retry of accepted workspace export", () => {
     expect((await db.select().from(nativeRunFinalizations).where(eq(nativeRunFinalizations.runId, f.runId)))[0]).toMatchObject({ phase: "result_accepted", resultId: f.resultId, nextAttemptAt: null });
     expect((await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId)))[0]).toMatchObject({ status: "active", releasedAt: null });
     expect(await db.select().from(activityLog).where(eq(activityLog.entityId, f.issueId))).toHaveLength(1);
+  });
+  it("reopens the stopped provider lifecycle before probing its exact sandbox", async () => {
+    const f = await seed(); let providerAdmissionOpen = false;
+    const resume = (f.request.environmentRuntime as { resumeRunLease: ReturnType<typeof vi.fn> }).resumeRunLease;
+    const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
+    resume.mockImplementation(async () => { providerAdmissionOpen = true; return { providerLeaseId: lease.providerLeaseId, metadata: { remoteCwd: "/work" } }; });
+    probe.mockImplementation(async () => { if (!providerAdmissionOpen) throw new Error("Released provider admission is closed"); return { exitCode: 0, timedOut: false }; });
+    await expect(retryNativeWorkspaceExport(f.request)).resolves.toMatchObject({ status: "queued" });
+    expect(resume).toHaveBeenCalledOnce();
+    expect(resume).toHaveBeenCalledWith(expect.objectContaining({ lease: expect.objectContaining({ id: f.leaseId, providerLeaseId: lease.providerLeaseId }) }));
+  });
+  it.each(["missing", "replacement", "wrong_root"])("refuses an unproven resume without probing or acquiring replacement: %s", async kind => {
+    const f = await seed();
+    const resume = (f.request.environmentRuntime as { resumeRunLease: ReturnType<typeof vi.fn> }).resumeRunLease;
+    const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
+    resume.mockResolvedValue({ providerLeaseId: kind === "missing" ? null : kind === "replacement" ? randomUUID() : lease.providerLeaseId,
+      metadata: { remoteCwd: kind === "wrong_root" ? "/other" : "/work" } });
+    await expect(retryNativeWorkspaceExport(f.request)).rejects.toThrow("Resume and repair");
+    expect(probe).not.toHaveBeenCalled();
+    expect((await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId)))[0].status).toBe("released");
   });
   it("fences an old failure whose transaction arrives after explicit repair admission", async () => {
     const f = await seed();

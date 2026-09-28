@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { EnvironmentLease } from "@paperclipai/shared";
+import type { Environment, EnvironmentLease } from "@paperclipai/shared";
 import { and, eq, gt, inArray, ne, or, sql } from "drizzle-orm";
 import { environmentLeases, environments, heartbeatRuns, issues, issueRecoveryActions, nativeRunFinalizations, nativeRunResults, type Db } from "@paperclipai/db";
 import { conflict } from "../../errors.js";
@@ -72,6 +72,13 @@ export async function retryNativeWorkspaceExport(input: {
       if (target?.kind !== "remote" || target.transport !== "sandbox" || !target.runner
         || target.remoteCwd !== initial.reference.remoteCwd) throw changed();
       try {
+        // A provider stop also closes its controller-side activity gate. The
+        // operator's external repair does not reopen that gate. Resume only the
+        // recorded lease through its provider so sentinel and drain checks run.
+        const resumed = await input.environmentRuntime.resumeRunLease({ environment: initial.environment as unknown as Environment,
+          lease: initial.lease as EnvironmentLease });
+        if (resumed?.providerLeaseId !== initial.lease.providerLeaseId
+          || resumed.metadata?.remoteCwd !== initial.reference.remoteCwd) throw new Error("sandbox_resume_identity_unproven");
         const probe = await target.runner.execute({ command: target.shellCommand ?? "sh", args: ["-c", "true"], cwd: "/", timeoutMs: 10_000, bypassSession: true });
         if (probe.timedOut || probe.exitCode !== 0) throw new Error("sandbox_not_running");
       } catch {
