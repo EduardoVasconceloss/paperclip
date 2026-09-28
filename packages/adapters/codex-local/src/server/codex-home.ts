@@ -374,7 +374,7 @@ export interface StageCodexHomeForSyncOptions {
  * is not fooled by `..` segments or a trailing-separator prefix collision
  * (`/a/skills` vs `/a/skills-evil`).
  */
-function isResolvedPathInside(candidate: string, root: string): boolean {
+export function isResolvedPathInside(candidate: string, root: string): boolean {
   if (candidate === root) return true;
   const rel = path.relative(root, candidate);
   return rel.length > 0 && !rel.startsWith("..") && !path.isAbsolute(rel);
@@ -470,6 +470,7 @@ async function stageContainedSubtree(
 async function stageDirectorySecure(
   sourceDir: string,
   targetDir: string,
+  containTopLevelLinks = false,
 ): Promise<void> {
   await fs.mkdir(targetDir, { recursive: true, mode: 0o700 });
   const realSourceDir = await fs.realpath(sourceDir);
@@ -488,6 +489,13 @@ async function stageDirectorySecure(
     // of it (`back -> .` / `back -> ..`) is degenerate: using it as a root would
     // re-stage the whole home under `skills/`. Skip it.
     if (isResolvedPathInside(realSourceDir, resolved)) continue;
+    // `agents/` children link to `<skill>/agents/<role>.toml`: the role must stay inside
+    // that skill, so a role file (or `agents/` dir) linked out of it cannot ship host files.
+    if (containTopLevelLinks && entry.isSymbolicLink()) {
+      const linkTarget = path.resolve(sourceDir, await fs.readlink(entrySource));
+      const skillRoot = await fs.realpath(path.dirname(path.dirname(linkTarget))).catch(() => null);
+      if (!skillRoot || !isResolvedPathInside(resolved, skillRoot)) continue;
+    }
     const entryStat = await fs.stat(resolved).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -530,7 +538,7 @@ async function stageCodexHomeEntry(
   if (stat.isDirectory()) {
     // Recursively copy with mode normalization — nested regular files land
     // `0600` and dangling/circular symlinks are skipped.
-    await stageDirectorySecure(source, target);
+    await stageDirectorySecure(source, target, entry === "agents");
     return;
   }
 

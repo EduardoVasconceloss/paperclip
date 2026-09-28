@@ -1134,6 +1134,40 @@ describe("stageCodexHomeForSync", () => {
     }
   });
 
+  it("does not stage an agent role whose real path escapes its skill", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-stage-roles-"));
+    let staged: string | null = null;
+    try {
+      const home = path.join(root, "codex-home");
+      const design = path.join(root, "store", "design");
+      const borrowed = path.join(root, "store", "borrowed");
+      await fs.mkdir(path.join(design, "agents"), { recursive: true });
+      await fs.mkdir(path.join(root, "outside"), { recursive: true });
+      await fs.mkdir(borrowed, { recursive: true });
+      await fs.writeFile(path.join(root, "secret.txt"), "host secret\n", "utf8");
+      await fs.writeFile(path.join(root, "outside", "loot.toml"), "host secret\n", "utf8");
+      await fs.writeFile(path.join(design, "agents", "ok.toml"), 'name = "ok"\n', "utf8");
+      // A role file that is itself a link out of the skill, and a skill whose agents/ dir is one.
+      await fs.symlink(path.join(root, "secret.txt"), path.join(design, "agents", "leak.toml"));
+      await fs.symlink(path.join(root, "outside"), path.join(borrowed, "agents"));
+      await fs.mkdir(path.join(home, "agents"), { recursive: true });
+      for (const [name, source] of [
+        ["ok.toml", path.join(design, "agents", "ok.toml")],
+        ["leak.toml", path.join(design, "agents", "leak.toml")],
+        ["loot.toml", path.join(borrowed, "agents", "loot.toml")],
+      ]) {
+        await fs.symlink(source, path.join(home, "agents", name));
+      }
+
+      staged = await stageCodexHomeForSync(home, { runId: "run-roles" });
+
+      expect(await fs.readdir(path.join(staged, "agents"))).toEqual(["ok.toml"]);
+    } finally {
+      if (staged) await fs.rm(staged, { recursive: true, force: true });
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   // C1 — staged credential file must be mode 0600 (not the world-readable default).
   it("writes the staged auth.json with mode 0600", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-stage-mode-"));
