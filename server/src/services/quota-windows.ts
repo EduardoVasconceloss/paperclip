@@ -1,5 +1,8 @@
+import { getQuotaWindowsForAuth } from "@paperclipai/adapter-codex-local/server";
+import type { Db } from "@paperclipai/db";
 import type { ProviderQuotaResult } from "@paperclipai/shared";
 import { listServerAdapters } from "../adapters/registry.js";
+import { aiConnectionService } from "./ai-connections.js";
 
 const QUOTA_PROVIDER_TIMEOUT_MS = 20_000;
 
@@ -37,6 +40,37 @@ export async function fetchAllQuotaWindows(): Promise<ProviderQuotaResult[]> {
       windows: [],
     };
   });
+}
+
+/**
+ * Adds the quota of the managed OpenAI subscription accounts the user may use in this company. Agents on
+ * managed AI connections have no login in the server's own Codex home, so the local probe fails for them.
+ * A successful managed result replaces a failed local one for the same provider.
+ */
+export async function fetchCompanyQuotaWindows(
+  db: Db,
+  companyId: string,
+  userId: string,
+): Promise<ProviderQuotaResult[]> {
+  const [local, accounts] = await Promise.all([
+    fetchAllQuotaWindows(),
+    aiConnectionService(db).subscriptionCredentials(companyId, userId, "openai"),
+  ]);
+  const managed = await Promise.all(
+    accounts.map((account) =>
+      withQuotaTimeout(
+        "codex_local",
+        account.value().then(getQuotaWindowsForAuth, (error: unknown) => ({
+          provider: "openai",
+          ok: false,
+          error: `${account.name}: ${error instanceof Error ? error.message : String(error)}`,
+          windows: [],
+        })),
+      ),
+    ),
+  );
+  const covered = new Set(managed.filter((r) => r.ok).map((r) => r.provider));
+  return [...local.filter((r) => r.ok || !covered.has(r.provider)), ...managed];
 }
 
 async function withQuotaTimeout(
