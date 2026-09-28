@@ -75,7 +75,8 @@ export async function releaseCompletedNativeWorkspaceExportRetention(db: Db, lea
   const [bound] = await db.select({ run: heartbeatRuns, coordinator: nativeRunFinalizations }).from(heartbeatRuns)
     .innerJoin(nativeRunFinalizations, and(eq(nativeRunFinalizations.runId, heartbeatRuns.id), eq(nativeRunFinalizations.companyId, heartbeatRuns.companyId)))
     .where(and(eq(heartbeatRuns.id, lease.heartbeatRunId!), eq(heartbeatRuns.companyId, lease.companyId),
-      eq(heartbeatRuns.status, "succeeded"), eq(heartbeatRuns.nativePhase, "committed"),
+      inArray(heartbeatRuns.status, ["succeeded", "failed", "cancelled", "timed_out", "interrupted"]),
+      eq(heartbeatRuns.nativePhase, "committed"),
       eq(nativeRunFinalizations.phase, "committed"), eq(nativeRunFinalizations.resultId, marker.resultId))).limit(1);
   const reference = readNativeWorkspaceSyncReference(bound?.run.runnerProfileJson?.nativeWorkspaceSync);
   if (!reference || reference.state !== "finalized" || !reference.finalHostSha256

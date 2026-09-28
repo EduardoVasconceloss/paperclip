@@ -99,11 +99,12 @@ describe("board retry of accepted workspace export", () => {
     }
     expect((await db.select().from(nativeRunResults).where(eq(nativeRunResults.id, f.resultId)))[0].schemaStatus).toBe("accepted");
   });
-  it.each(["complete", "unexported", "wrong_result", "failed_run", "wrong_allocation", "competing_owner"])("releases ephemeral retention only after exact committed copyback: %s", async kind => {
+  it.each(["complete", "committed_failed", "committed_cancelled", "running", "unexported", "wrong_result", "uncommitted_run", "wrong_allocation", "competing_owner"])("releases ephemeral retention only after exact committed copyback: %s", async kind => {
     const f = await seed();
     await retryNativeWorkspaceExport(f.request);
     const [run] = await db.select().from(heartbeatRuns).where(eq(heartbeatRuns.id, f.runId));
-    await db.update(heartbeatRuns).set({ status: kind === "failed_run" ? "failed" : "succeeded", nativePhase: "committed",
+    await db.update(heartbeatRuns).set({ status: kind === "running" ? "running" : kind === "committed_cancelled" ? "cancelled" : ["uncommitted_run", "committed_failed"].includes(kind) ? "failed" : "succeeded",
+      nativePhase: kind === "uncommitted_run" ? "terminal_failure" : "committed",
       runnerProfileJson: { ...run.runnerProfileJson, nativeWorkspaceSync: { ...(run.runnerProfileJson!.nativeWorkspaceSync as object),
         state: kind === "unexported" ? "prepared" : "finalized", finalHostSha256: "c".repeat(64), resourceDisposition: "destroy",
         ...(kind === "wrong_allocation" ? { providerLeaseId: randomUUID() } : {}) } },
@@ -112,10 +113,11 @@ describe("board retry of accepted workspace export", () => {
     const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
     if (kind === "competing_owner") await db.insert(environmentLeases).values({ companyId, environmentId, status: "active", provider: lease.provider, providerLeaseId: lease.providerLeaseId });
     const released = await releaseCompletedNativeWorkspaceExportRetention(db, lease);
-    if (kind === "complete") expect(released?.metadata?.nativeWorkspaceExportResume).toBeUndefined();
+    const committed = ["complete", "committed_failed", "committed_cancelled"].includes(kind);
+    if (committed) expect(released).toMatchObject({ id: lease.id, metadata: expect.not.objectContaining({ nativeWorkspaceExportResume: expect.anything() }) });
     else expect(released).toBeNull();
     const [after] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
-    expect(Boolean(after.metadata?.nativeWorkspaceExportResume)).toBe(kind !== "complete");
+    expect(Boolean(after.metadata?.nativeWorkspaceExportResume)).toBe(!committed);
   });
   it("records a recoverable stop-only intent before the provider can resume", async () => {
     const f = await seed();
