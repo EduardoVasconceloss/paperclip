@@ -1,7 +1,8 @@
 import { readEnvironmentCreationCleanupError } from "@paperclipai/plugin-sdk";
 import { remoteTerminationReceipt } from "./remote-execution-termination.js";
+import { hasNativeWorkspaceExportResume, readNativeWorkspaceExportResume } from "./native-runtime/native-workspace-export-resume.js";
 import { createHash, randomUUID } from "node:crypto";
-import { and, eq, inArray, sql } from "drizzle-orm";
+import { and, eq, inArray, ne, sql } from "drizzle-orm";
 import type { Db } from "@paperclipai/db";
 import { companySecrets, companySecretVersions, environmentLeases, heartbeatRuns } from "@paperclipai/db";
 import type {
@@ -2564,6 +2565,22 @@ function createSandboxEnvironmentDriver(
     },
 
     async retryPendingSandboxTeardown(input) {
+      const exportResume = hasNativeWorkspaceExportResume(input.lease);
+      const resumeIntent = readNativeWorkspaceExportResume(input.lease);
+      const assertExportResumeOwnership = async () => {
+        if (!resumeIntent) throw new Error("Workspace export resume ownership is invalid.");
+        const [current] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, input.lease.id)).limit(1);
+        const [otherOwner] = await db.select({ id: environmentLeases.id }).from(environmentLeases).where(and(
+          ne(environmentLeases.id, input.lease.id), eq(environmentLeases.provider, input.lease.provider!),
+          eq(environmentLeases.providerLeaseId, input.lease.providerLeaseId!), inArray(environmentLeases.status, ["active", "pending_cleanup"]),
+        )).limit(1);
+        if (!current || current.status !== "pending_cleanup" || current.companyId !== input.lease.companyId
+          || current.metadata?.pendingCleanupAttemptId !== input.lease.metadata?.pendingCleanupAttemptId
+          || readNativeWorkspaceExportResume(current)?.requestId !== resumeIntent.requestId || otherOwner) {
+          throw new Error("Workspace export resume ownership changed before cleanup.");
+        }
+      };
+      if (exportResume) await assertExportResumeOwnership();
       // Resolve the teardown from the immutable orphan lease row, not from the
       // current environment. The row keeps the provider, the provider lease id,
       // and the sandbox config in its metadata. A provider change re-points the
@@ -2614,6 +2631,23 @@ function createSandboxEnvironmentDriver(
           { issueId: input.lease.issueId, heartbeatRunId: input.lease.heartbeatRunId },
         );
         const workerConfig = stripSandboxProviderEnvelope(config as SandboxEnvironmentConfig);
+        if (exportResume) {
+          const pluginId = pluginProvider.resolved.plugin.id;
+          if (!pluginWorkerVerifiesLifecycleMethod(pluginId, "environmentReleaseLease")) {
+            throw new Error("Workspace export recovery requires verified stop-only cleanup.");
+          }
+          await assertExportResumeOwnership();
+          const receipt = await pluginWorkerManager.call(pluginId, "environmentReleaseLease", {
+            driverKey: recordedProvider, companyId: input.lease.companyId,
+            environmentId: input.lease.environmentId ?? "", issueId: input.lease.issueId,
+            config: workerConfig, providerLeaseId: input.lease.providerLeaseId,
+            leaseMetadata: input.lease.metadata ?? {}, cancelActiveWork: true,
+          }, Math.min(resolvePluginSandboxRpcTimeoutMs(workerConfig) ?? 60_000, 60_000));
+          if (remoteTerminationReceipt(input.lease, receipt)?.state !== "stopped") {
+            throw new Error("Workspace export recovery did not confirm the retained sandbox stopped.");
+          }
+          return receipt;
+        }
         const failedCreation = readEnvironmentCreationCleanupError({ data: {
           schema: "paperclip/environment-creation-cleanup/v1",
           cleanup: input.lease.metadata?.failedCreateCleanup,
@@ -2649,6 +2683,7 @@ function createSandboxEnvironmentDriver(
       // durable orphan record, not the environment binding, for the same reason
       // as the plugin path above. The teardown targets the recorded provider,
       // never the current environment provider.
+      if (exportResume) throw new Error("Workspace export recovery requires verified stop-only cleanup.");
       const cleanupConfig = await resolveSandboxCleanupConfigSecrets(
         db,
         input.lease.companyId,

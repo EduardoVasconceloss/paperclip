@@ -35,7 +35,10 @@ describe("board retry of accepted workspace export", () => {
     const identity = { id: leaseId, companyId, heartbeatRunId: runId, provider: "daytona", providerLeaseId };
     await db.insert(environmentLeases).values({ ...identity, environmentId, issueId, status: "released", releasedAt: new Date(), cleanupStatus: "success", leasePolicy: "reuse_by_environment", metadata: { remoteExecutionTermination: remoteTerminationReceipt(identity, { providerLeaseId, state: "stopped" }) } });
     await db.insert(issueRecoveryActions).values({ id: actionId, companyId, sourceIssueId: issueId, kind: "active_run_watchdog", ownerType: "board", returnOwnerAgentId: agentId, cause: "native_workspace_sync_out_unsafe_archive", fingerprint: runId, evidence: { runId }, nextAction: "Repair saved files" });
-    const request = { db, companyId, issueId, actionId, runId, actorId: "board", repairNote: "Removed only the known unsafe fixture link and preserved the saved work.", environmentRuntime: { resumeRunLease: vi.fn().mockResolvedValue({ providerLeaseId, metadata: { remoteCwd: "/work" } }) } as never };
+    const request = { db, companyId, issueId, actionId, runId, actorId: "board", repairNote: "Removed only the known unsafe fixture link and preserved the saved work.", environmentRuntime: {
+      resumeRunLease: vi.fn().mockResolvedValue({ providerLeaseId, metadata: { remoteCwd: "/work" } }),
+      retryPendingSandboxTeardown: vi.fn().mockResolvedValue({ providerLeaseId, state: "stopped" }),
+    } as never };
     return { ...request, request, resultId, leaseId };
   }
   it("queues only the existing result and lease, audits once, and deduplicates a pending click", async () => {
@@ -61,6 +64,75 @@ describe("board retry of accepted workspace export", () => {
     await expect(retryNativeWorkspaceExport(f.request)).resolves.toMatchObject({ status: "queued" });
     expect(resume).toHaveBeenCalledOnce();
     expect(resume).toHaveBeenCalledWith(expect.objectContaining({ lease: expect.objectContaining({ id: f.leaseId, providerLeaseId: lease.providerLeaseId }) }));
+  });
+  it("records a recoverable stop-only intent before the provider can resume", async () => {
+    const f = await seed();
+    const runtime = f.request.environmentRuntime as { resumeRunLease: ReturnType<typeof vi.fn>; retryPendingSandboxTeardown: ReturnType<typeof vi.fn> };
+    runtime.resumeRunLease.mockImplementation(async () => {
+      const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
+      expect(lease).toMatchObject({ status: "pending_cleanup", cleanupStatus: "failed", metadata: {
+        nativeWorkspaceExportResume: { runId: f.runId, leaseId: f.leaseId, resultId: f.resultId },
+        pendingCleanupInFlight: true,
+      } });
+      expect(lease.metadata?.remoteExecutionTermination).toBeUndefined();
+      return { providerLeaseId: lease.providerLeaseId, metadata: { remoteCwd: "/work" } };
+    });
+    await expect(retryNativeWorkspaceExport(f.request)).resolves.toMatchObject({ status: "queued" });
+    expect(runtime.retryPendingSandboxTeardown).not.toHaveBeenCalled();
+    const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
+    expect(lease.status).toBe("active");
+    expect(lease.metadata?.nativeWorkspaceExportResume).toBeUndefined();
+  });
+  it.each(["resume_reply_lost", "probe_failed", "admission_changed", "cancelled", "completed", "stop_failed"])("tracks and compensates a failed export resume: %s", async kind => {
+    const f = await seed();
+    const runtime = f.request.environmentRuntime as { resumeRunLease: ReturnType<typeof vi.fn>; retryPendingSandboxTeardown: ReturnType<typeof vi.fn> };
+    if (kind === "resume_reply_lost") runtime.resumeRunLease.mockRejectedValueOnce(new Error("reply lost after provider resumed"));
+    else probe.mockImplementationOnce(async () => {
+      if (kind === "admission_changed") {
+        await db.insert(heartbeatRuns).values({ companyId, agentId, nativeIssueId: f.issueId, status: "failed", createdAt: new Date(Date.now() + 1000) });
+        return { exitCode: 0, timedOut: false };
+      }
+      if (kind === "cancelled" || kind === "completed") {
+        await db.update(heartbeatRuns).set({ status: kind === "cancelled" ? "cancelled" : "succeeded" }).where(eq(heartbeatRuns.id, f.runId));
+        return { exitCode: 0, timedOut: false };
+      }
+      throw new Error("probe unavailable");
+    });
+    if (kind === "stop_failed") runtime.retryPendingSandboxTeardown.mockRejectedValueOnce(new Error("provider stop unavailable"));
+    await expect(retryNativeWorkspaceExport(f.request)).rejects.toThrow();
+    expect(runtime.retryPendingSandboxTeardown).toHaveBeenCalledOnce();
+    expect(runtime.retryPendingSandboxTeardown).toHaveBeenCalledWith(expect.objectContaining({ lease: expect.objectContaining({ id: f.leaseId, heartbeatRunId: f.runId }) }));
+    const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
+    expect(lease).toMatchObject(kind === "stop_failed" ? { status: "pending_cleanup", cleanupStatus: "failed" } : { status: "released", cleanupStatus: "success" });
+    if (kind === "stop_failed") {
+      expect(lease.metadata?.remoteExecutionTermination).toBeUndefined();
+      expect(lease.metadata?.pendingCleanupInFlight).toBe(false);
+      expect(lease.metadata?.nativeWorkspaceExportResume).toMatchObject({ runId: f.runId, leaseId: f.leaseId });
+    } else expect(lease.metadata?.remoteExecutionTermination).toMatchObject({ runId: f.runId, leaseId: f.leaseId, state: "stopped" });
+    expect((await db.select().from(nativeRunFinalizations).where(eq(nativeRunFinalizations.runId, f.runId)))[0]).toMatchObject({ phase: "terminal_failure", resultId: f.resultId });
+    expect(await db.select().from(agentWakeupRequests).where(eq(agentWakeupRequests.companyId, companyId))).toHaveLength(0);
+  });
+  it.each(["rebound_lease", "competing_owner", "late_stop_receipt"])("does not stop or overwrite a newer sandbox owner: %s", async kind => {
+    const f = await seed();
+    const runtime = f.request.environmentRuntime as { retryPendingSandboxTeardown: ReturnType<typeof vi.fn> };
+    const rebound = async () => db.update(environmentLeases).set({ status: "active", heartbeatRunId: null,
+      metadata: { newOwner: true }, cleanupStatus: null, releasedAt: null }).where(eq(environmentLeases.id, f.leaseId));
+    probe.mockImplementationOnce(async () => {
+      if (kind === "rebound_lease") await rebound();
+      if (kind === "competing_owner") {
+        const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
+        await db.insert(environmentLeases).values({ companyId, environmentId, status: "active", provider: lease.provider, providerLeaseId: lease.providerLeaseId });
+      }
+      throw new Error("probe failed after ownership changed");
+    });
+    if (kind === "late_stop_receipt") runtime.retryPendingSandboxTeardown.mockImplementationOnce(async ({ lease }) => {
+      await rebound(); return { providerLeaseId: lease.providerLeaseId, state: "stopped" };
+    });
+    await expect(retryNativeWorkspaceExport(f.request)).rejects.toThrow();
+    expect(runtime.retryPendingSandboxTeardown).toHaveBeenCalledTimes(kind === "late_stop_receipt" ? 1 : 0);
+    const [lease] = await db.select().from(environmentLeases).where(eq(environmentLeases.id, f.leaseId));
+    if (kind !== "competing_owner") expect(lease).toMatchObject({ status: "active", heartbeatRunId: null, metadata: { newOwner: true }, cleanupStatus: null });
+    expect(lease.metadata?.remoteExecutionTermination).toBeUndefined();
   });
   it.each(["missing", "replacement", "wrong_root"])("refuses an unproven resume without probing or acquiring replacement: %s", async kind => {
     const f = await seed();

@@ -106,6 +106,25 @@ returns `409` without reopening work. A duplicate queued request is idempotent.
 An export that is still unsafe creates another explicit repair hold. Generic
 recovery's **Retry source task** does not substitute for export-only retry.
 
+Before resuming the retained sandbox, the controller durably records a stop-only
+cleanup intent on that exact lease and removes the old stopped receipt. If the
+resume reply is lost, probing fails, or admission changes, it stops and retains
+the sandbox. A failed stop remains `pending_cleanup`; a restarted controller's
+bounded cleanup sweep retries the verified stop without destroying saved files.
+An in-flight request holds a 15-minute cleanup claim, so a controller crash may
+delay that sweep until the claim expires. Neither an unconfirmed stop nor a
+stale receipt grants admission, and a changed lease or competing sandbox owner
+prevents cleanup from taking ownership. Retry export after the lease has a new
+confirmed stopped receipt. No provider turn is created by this recovery.
+
+The opt-in `native-workspace-export-resume.live.test.ts` is a provider-boundary
+fault integration, separate from the browser Product E2E. After building the
+Daytona plugin, run that exact Vitest file with `PAPERCLIP_LIVE_EXPORT_RESUME=1`,
+`DAYTONA_API_KEY`, and `PAPERCLIP_LIVE_EXPORT_RESUME_IMAGE` set to an immutable
+image digest. It creates one disposable sandbox and database, injects probe and
+stop transport failures, and verifies a fresh runtime can stop the sandbox while
+preserving exact nonce bytes. It deletes only that owned fixture after proof.
+
 The reconciliation sweep also restores a repair notice that an older generic
 sweeper incorrectly resolved as `new_source_execution_path`, but only for the
 current blocked task with its accepted result and exact stopped lease. It does

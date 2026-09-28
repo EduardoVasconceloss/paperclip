@@ -5037,6 +5037,46 @@ describeEmbeddedPostgres("environmentRuntimeService", () => {
     expect(await db.select().from(environmentLeases)).toHaveLength(1);
   });
 
+  it.each(["stopped", "unconfirmed", "foreign_marker", "competing_owner", "live_request", "late_receipt"])("recovers a pending export resume with stop-only cleanup after restart: %s", async outcome => {
+    const seeded = await seedReusablePluginSandboxLease("paperclip_runner");
+    const lease = seeded.reusableLease;
+    const requestId = randomUUID();
+    await db.update(environmentLeases).set({ status: "pending_cleanup", cleanupStatus: "failed", metadata: {
+      ...lease.metadata,
+      nativeWorkspaceExportResume: { schema: "paperclip.workspace-export-resume.v1", requestId, companyId: seeded.companyId,
+        runId: outcome === "foreign_marker" ? randomUUID() : lease.heartbeatRunId, leaseId: lease.id,
+        provider: lease.provider, providerLeaseId: lease.providerLeaseId, resultId: randomUUID() },
+      pendingCleanupAttemptId: requestId, pendingCleanupInFlight: true,
+      pendingCleanupLeaseExpiresAtMs: Date.now() + (outcome === "live_request" ? 60_000 : -1),
+    } }).where(eq(environmentLeases.id, lease.id));
+    if (outcome === "competing_owner") await db.insert(environmentLeases).values({ companyId: seeded.companyId,
+      environmentId: seeded.environment.id, status: "active", provider: lease.provider, providerLeaseId: lease.providerLeaseId });
+    const call = vi.fn(async (_id: string, method: string) => {
+      if (method !== "environmentReleaseLease") throw new Error("Saved workspace must never be destroyed");
+      if (outcome === "late_receipt") await db.update(environmentLeases).set({ status: "active", heartbeatRunId: null,
+        cleanupStatus: null, metadata: { newOwner: true } }).where(eq(environmentLeases.id, lease.id));
+      return outcome === "unconfirmed" ? undefined : { providerLeaseId: lease.providerLeaseId, state: "stopped" };
+    });
+    const workerManager = { isRunning: () => true, call,
+      getWorker: () => ({ supportedMethods: ["environmentReleaseLease", "environmentDestroyLease"] }),
+    } as unknown as PluginWorkerManager;
+    const restarted = environmentRuntimeService(db, { pluginWorkerManager: workerManager });
+    await heartbeatService(db, { environmentRuntime: restarted }).sweepPendingCleanupLeases({ backoffMs: 0 });
+    expect(call.mock.calls.some((entry) => entry[1] === "environmentDestroyLease")).toBe(false);
+    const persisted = (await environmentService(db).getLeaseById(lease.id))!;
+    if (outcome === "stopped") {
+      expect(call).toHaveBeenCalledWith(seeded.pluginId, "environmentReleaseLease", expect.objectContaining({ providerLeaseId: lease.providerLeaseId, cancelActiveWork: true }), expect.any(Number));
+      expect(persisted).toMatchObject({ status: "expired", cleanupStatus: "success", metadata: { remoteExecutionTermination: { state: "stopped", runId: lease.heartbeatRunId } } });
+      expect(persisted.metadata?.nativeWorkspaceExportResume).toBeUndefined();
+    } else if (outcome === "late_receipt") {
+      expect(persisted).toMatchObject({ status: "active", heartbeatRunId: null, cleanupStatus: null, metadata: { newOwner: true } });
+    } else {
+      expect(persisted).toMatchObject({ status: "pending_cleanup", cleanupStatus: "failed" });
+      expect(persisted.metadata?.remoteExecutionTermination).toBeUndefined();
+      if (["foreign_marker", "competing_owner", "live_request"].includes(outcome)) expect(call).not.toHaveBeenCalled();
+    }
+  });
+
   it("does not allocate a native-runner replacement without a verified backup", async () => {
     const seeded = await seedReusablePluginSandboxLease("paperclip_runner");
     const workerManager = {

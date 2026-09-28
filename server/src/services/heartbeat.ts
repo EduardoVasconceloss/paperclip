@@ -5,6 +5,7 @@ import {
   type NativeWorkspaceFinalizationOwnership,
 } from "./native-runtime/native-workspace-finalization-ownership.js";
 import { classifyNativeWorkspaceFailure, type NativeWorkspaceFailureCode } from "./native-runtime/native-workspace-failure.js";
+import { hasNativeWorkspaceExportResume, settleNativeWorkspaceExportResume } from "./native-runtime/native-workspace-export-resume.js";
 import { applyWorkspaceRestoreFailure } from "@paperclipai/adapter-utils/workspace-restore-result";
 import { hasWorkspaceRestoreFailure } from "@paperclipai/shared";
 import { externalConversationStateSql, nonIdleSlackIssueCondition } from "./slack-conversation-state.js";
@@ -18572,8 +18573,10 @@ export function heartbeatService(
       // environment still exists tears down through `destroyRunLease`. That
       // path uses the provider and configuration recorded on the lease first;
       // the environment is lifecycle context and only a legacy fallback.
+      // An interrupted export resume also uses recorded cleanup, but its tagged
+      // intent permits verified stop-and-retain only, never sandbox destruction.
       const isOrphanEphemeralLease = lease.leasePolicy === "ephemeral";
-      const useRecordedTeardown = isOrphanEphemeralLease || !environment;
+      const useRecordedTeardown = isOrphanEphemeralLease || !environment || hasNativeWorkspaceExportResume(lease);
 
       // Do not consume a finite cleanup attempt while the provider plugin is
       // briefly unavailable. A plugin worker restart, a plugin reload, or a
@@ -18642,7 +18645,9 @@ export function heartbeatService(
             environment,
             lease,
           });
-          const released = await environmentsSvc.releaseLease(lease.id, "expired", {
+          const released = hasNativeWorkspaceExportResume(lease)
+            ? await settleNativeWorkspaceExportResume(db, lease, { attemptId: claimed, receipt, status: "expired" })
+            : await environmentsSvc.releaseLease(lease.id, "expired", {
             expectedPendingCleanupAttemptId: claimed,
             cleanupStatus: "success",
             failureReason: "pending_cleanup_retry",
