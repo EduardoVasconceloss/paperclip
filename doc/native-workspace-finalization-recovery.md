@@ -67,3 +67,42 @@ stop evidence. The ordinary reconciliation sweep then resumes workspace
 finalization from the accepted result. Confirm the run's native phase and
 `resultJson.finalizationPhase` are `committed`, there is no `nextAttemptAt`, and
 no workspace operation is still running. The accepted provider result is reused.
+
+## Repairing a rejected archive without rerunning the agent
+
+An escaping symlink or unsafe archive member produces
+`native_workspace_sync_out_unsafe_archive` on the first export attempt. The task
+is blocked, the accepted result stays saved, and the sandbox is stopped and
+retained. Automatic retry cannot repair unsafe input. Archive confinement remains
+in force; no link is followed or silently discarded.
+
+A board member with runtime management access can complete the saved result:
+
+1. Read the recovery action, run, and environment lease. Verify the company, run,
+   provider sandbox ID, and stopped-provider receipt. Preserve that exact sandbox;
+   do not acquire a replacement or seed the host workspace over it.
+2. Through the provider console or official SDK, resume that sandbox and repair
+   the identified unsafe entry. For a sandbox-only tool alias, record its target
+   and remove or replace that alias with a confined link while preserving all user
+   files. Inspect arbitrary user links before changing them. Extending the sandbox
+   retention window can be necessary during this repair.
+3. In the task's **Workspace export needs repair** notice, describe the repair and
+   choose **Retry workspace export**. The equivalent board API is
+   `POST /api/issues/:id/recovery-actions/retry-workspace-export` with
+   `{ "actionId": "<recovery-action-id>", "runId": "<run-id>", "repairNote": "<repair and preservation evidence>" }`.
+4. Confirm the same run commits, the saved result determines the task outcome,
+   and the recovery action resolves. No new provider turn or wake is created.
+   The repair sandbox is stopped and retained again after finalization.
+
+Admission requires the same accepted result, task owner, descriptor, and lease;
+confirmed prior provider stop; an available repaired sandbox; and no newer task
+execution or competing current lease. It shares finalization ownership and
+revalidates after probing the sandbox. A changed binding or unavailable sandbox
+returns `409` without reopening work. A duplicate queued request is idempotent.
+An export that is still unsafe creates another explicit repair hold. Generic
+recovery's **Retry source task** does not substitute for export-only retry.
+
+The reconciliation sweep also restores a repair notice that an older generic
+sweeper incorrectly resolved as `new_source_execution_path`, but only for the
+current blocked task with its accepted result and exact stopped lease. It does
+not reopen the run or replace a different current recovery action.

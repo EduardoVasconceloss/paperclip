@@ -18800,7 +18800,7 @@ export function heartbeatService(
       agentId: input.agentId,
       status: settledRun?.status,
       failureReason: settledRun?.error ?? undefined,
-      providerResourceDisposition: input.succeeded
+      providerResourceDisposition: input.succeeded && !parseObject(settledRun?.resultJson).workspaceExportRetry
         ? (workspaceSyncReference?.resourceDisposition ?? "stop_and_retain")
         : "stop_and_retain",
     });
