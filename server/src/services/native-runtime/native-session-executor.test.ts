@@ -10694,7 +10694,7 @@ describe("runnerd provider runtime wiring", () => {
     await expect(prepareReplacement()).rejects.toThrow("runner_harness_state_mismatch");
     await expect(backend.openReplacementSession!({
       identity: { runId: execution.binding.runId }, workingDirectory: execution.workspace.cwd,
-    } as never)).resolves.toBe(replacement);
+    } as never, {} as never)).resolves.toBe(replacement);
     expect(openSession).toHaveBeenCalledOnce();
     await expect(access(join(root, "failover-backups"))).rejects.toThrow();
     const archives = await readdir(join(root, "continuity-breaks"));
