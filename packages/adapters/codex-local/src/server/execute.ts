@@ -993,6 +993,18 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
     const billingType = resolveCodexBillingType(effectiveEnv);
     const networkScope = parseLocalProcessNetworkScope(config.networkScope);
     const filesystemScope = parseLocalProcessFilesystemScope(config.filesystemScope);
+    if (filesystemScope && !executionTargetIsRemote) {
+      for (const entry of codexSkillEntries.filter((e) => desiredSkillNames.includes(e.key))) {
+        const link = path.join(codexSkillsDir, entry.runtimeName);
+        const linkedPath = await fs.readlink(link).catch(() => null);
+        if (linkedPath && path.resolve(codexSkillsDir, linkedPath) !== entry.source) {
+          await onLog(
+            "stderr",
+            `[paperclip] Codex skill "${entry.runtimeName}" links to ${path.resolve(codexSkillsDir, linkedPath)}, outside the Paperclip skill sources: it is not mounted and will not be readable in the workspace sandbox.\n`,
+          );
+        }
+      }
+    }
     const localProcessSandbox: LocalProcessSandboxOptions | null =
       (filesystemScope || networkScope) && !executionTargetIsRemote
         ? {
@@ -1000,19 +1012,11 @@ export async function execute(ctx: AdapterExecutionContext): Promise<AdapterExec
             filesystemScope,
             managedPaths: [
               { path: effectiveCodexHome, access: "rw" },
-              // Mount what each CODEX_HOME/skills link resolves to: injection keeps a live operator link
-              // whose target differs from the Paperclip source.
-              ...(await Promise.all(
-                codexSkillEntries
-                  .filter((entry) => desiredSkillNames.includes(entry.key))
-                  .map(async (entry) => {
-                    const linkedPath = await fs.readlink(path.join(codexSkillsDir, entry.runtimeName)).catch(() => null);
-                    return {
-                      path: linkedPath ? path.resolve(codexSkillsDir, linkedPath) : entry.source,
-                      access: "ro" as const,
-                    };
-                  }),
-              )),
+              // Only the Paperclip source of each skill: CODEX_HOME is writable in the sandbox, so what a
+              // kept link resolves to is agent-controlled and must not be mounted.
+              ...codexSkillEntries
+                .filter((entry) => desiredSkillNames.includes(entry.key))
+                .map((entry) => ({ path: entry.source, access: "ro" as const })),
             ],
             extraPaths: parseLocalProcessSandboxExtraPaths(config.filesystemExtraPaths),
             pathAliases: targetWorkspaceRealization?.mode === "copy"

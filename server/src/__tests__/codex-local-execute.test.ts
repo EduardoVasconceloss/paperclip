@@ -1705,36 +1705,40 @@ process.exit(r.status ?? 1);
     }
   });
 
-  it.runIf(Boolean(process.env.PAPERCLIP_TEST_BWRAP))("keeps a preserved custom CODEX_HOME skill link readable inside a real bwrap sandbox", async () => {
-    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-real-bwrap-"));
+  it("does not mount the target of a preserved CODEX_HOME skill link outside the Paperclip sources", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-execute-foreign-skill-"));
     const workspace = path.join(root, "workspace");
-    // Own directory: the sandbox mounts the command's directory, which must not expose the test root.
-    const commandPath = path.join(root, "bin", "codex");
+    const commandPath = path.join(root, "codex");
+    const bwrapPath = path.join(root, "bwrap");
     const codexHome = path.join(root, "codex-home");
-    const customSkill = path.join(root, "operator-skills", "paperclip");
-    const seenPath = path.join(workspace, "seen.txt");
-    await fs.mkdir(path.dirname(commandPath), { recursive: true });
+    const bwrapCapturePath = path.join(root, "bwrap.json");
+    // CODEX_HOME is writable inside the sandbox, so a kept link may point at any host directory.
+    const foreignDir = path.join(root, "host-secrets");
     await fs.mkdir(workspace, { recursive: true });
-    await fs.mkdir(customSkill, { recursive: true });
-    await fs.writeFile(path.join(customSkill, "SKILL.md"), "operator-skill\n", "utf8");
-    // A live operator link that Codex skill injection preserves instead of replacing.
+    await fs.mkdir(foreignDir, { recursive: true });
+    await fs.writeFile(path.join(foreignDir, "SKILL.md"), "not a paperclip skill\n", "utf8");
     await fs.mkdir(path.join(codexHome, "skills"), { recursive: true });
-    await fs.symlink(customSkill, path.join(codexHome, "skills", "paperclip"));
-    // Plain sh so the fake runs inside the confined root without a node mount.
-    await fs.writeFile(commandPath, `#!/bin/sh
-cat "$CODEX_HOME/skills/paperclip/SKILL.md" > ${JSON.stringify(seenPath)} 2>&1
-echo '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0,"output_tokens":1}}'
+    await fs.symlink(foreignDir, path.join(codexHome, "skills", "paperclip"));
+    await writeFakeCodexCommand(commandPath);
+    await fs.writeFile(bwrapPath, `#!/usr/bin/env node
+const fs = require("node:fs");
+const argv = process.argv.slice(2);
+fs.writeFileSync(process.env.PAPERCLIP_TEST_BWRAP_CAPTURE, JSON.stringify(argv));
+const sep = argv.indexOf("--");
+const r = require("node:child_process").spawnSync(argv[sep + 1], argv.slice(sep + 2), { stdio: "inherit" });
+process.exit(r.status ?? 1);
 `, "utf8");
-    await fs.chmod(commandPath, 0o755);
+    await fs.chmod(bwrapPath, 0o755);
 
     const previousHome = process.env.HOME;
     const previousPaperclipHome = process.env.PAPERCLIP_HOME;
     process.env.HOME = root;
     process.env.PAPERCLIP_HOME = path.join(root, "paperclip-home");
+    const stderr: string[] = [];
 
     try {
       await execute({
-        runId: "run-real-bwrap-skills",
+        runId: "run-foreign-skill-link",
         agent: { id: "agent-1", companyId: "company-1", name: "Codex Coder", adapterType: "codex_local", adapterConfig: {} },
         runtime: { sessionId: null, sessionParams: null, sessionDisplayId: null, taskKey: null },
         config: {
@@ -1742,18 +1746,25 @@ echo '{"type":"turn.completed","usage":{"input_tokens":1,"cached_input_tokens":0
           command: commandPath,
           cwd: workspace,
           filesystemScope: "workspace",
-          filesystemSandboxCommand: process.env.PAPERCLIP_TEST_BWRAP,
-          env: { CODEX_HOME: codexHome },
+          filesystemSandboxCommand: bwrapPath,
+          env: { CODEX_HOME: codexHome, PAPERCLIP_TEST_BWRAP_CAPTURE: bwrapCapturePath },
           promptTemplate: "Follow the paperclip heartbeat.",
           paperclipSkillSync: { desiredSkills: ["paperclip"] },
         },
         context: {},
         authToken: "run-jwt-token",
-        onLog: async () => {},
+        onLog: async (stream, chunk) => {
+          if (stream === "stderr") stderr.push(chunk);
+        },
       });
 
-      expect(await fs.readlink(path.join(codexHome, "skills", "paperclip"))).toBe(customSkill);
-      expect(await fs.readFile(seenPath, "utf8")).toBe("operator-skill\n");
+      const bwrapArgs = JSON.parse(await fs.readFile(bwrapCapturePath, "utf8")) as string[];
+      expect(await fs.readlink(path.join(codexHome, "skills", "paperclip"))).toBe(foreignDir);
+      expect(bwrapArgs.some((arg) => arg === foreignDir || arg.startsWith(`${foreignDir}/`))).toBe(false);
+      expect(stderr.join("")).toContain('Codex skill "paperclip"');
+      // The Paperclip source of the skill is still mounted.
+      const roBinds = bwrapArgs.filter((arg, i) => i > 0 && bwrapArgs[i - 1] === "--ro-bind");
+      expect(roBinds.some((arg) => path.basename(arg) === "paperclip")).toBe(true);
     } finally {
       if (previousHome === undefined) delete process.env.HOME;
       else process.env.HOME = previousHome;
