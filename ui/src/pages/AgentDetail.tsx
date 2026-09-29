@@ -360,7 +360,7 @@ function setsEqual<T>(left: Set<T>, right: Set<T>) {
   return true;
 }
 
-function runMetrics(run: HeartbeatRun) {
+export function runMetrics(run: HeartbeatRun) {
   const usage = (run.usageJson ?? null) as Record<string, unknown> | null;
   const result = (run.resultJson ?? null) as Record<string, unknown> | null;
   const input = usageNumber(usage, "inputTokens", "input_tokens");
@@ -380,7 +380,7 @@ function runMetrics(run: HeartbeatRun) {
     output,
     cached,
     cost,
-    totalTokens: input + output,
+    totalTokens: input + cached + output,
     provider,
     model,
   };
