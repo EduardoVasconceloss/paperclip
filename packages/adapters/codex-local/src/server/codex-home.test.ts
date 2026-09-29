@@ -1083,7 +1083,11 @@ describe("stageCodexHomeForSync", () => {
     await fs.symlink(skillSource, path.join(home, "skills", "demo.md"));
     // agents/ holds agent-role links into skill sources.
     await fs.mkdir(path.join(home, "agents"), { recursive: true });
-    await fs.symlink(skillSource, path.join(home, "agents", "demo.toml"));
+    const roleSkill = path.join(root, "shared", "role-skill");
+    await fs.mkdir(path.join(roleSkill, "agents"), { recursive: true });
+    await fs.writeFile(path.join(roleSkill, "agents", "demo.toml"), skillBytes, "utf8");
+    await fs.symlink(roleSkill, path.join(home, "skills", "role-skill"));
+    await fs.symlink(path.join(roleSkill, "agents", "demo.toml"), path.join(home, "agents", "demo.toml"));
 
     // Decoys: large runtime state the 4-name denylist missed.
     await fs.writeFile(path.join(home, "logs_2.sqlite"), "x", "utf8");
@@ -1151,10 +1155,15 @@ describe("stageCodexHomeForSync", () => {
       await fs.symlink(path.join(root, "secret.txt"), path.join(design, "agents", "leak.toml"));
       await fs.symlink(path.join(root, "outside"), path.join(borrowed, "agents"));
       await fs.mkdir(path.join(home, "agents"), { recursive: true });
+      await fs.mkdir(path.join(home, "skills"), { recursive: true });
+      await fs.symlink(design, path.join(home, "skills", "design"));
+      await fs.symlink(borrowed, path.join(home, "skills", "borrowed"));
       for (const [name, source] of [
         ["ok.toml", path.join(design, "agents", "ok.toml")],
         ["leak.toml", path.join(design, "agents", "leak.toml")],
         ["loot.toml", path.join(borrowed, "agents", "loot.toml")],
+        // A link straight at a host file, not at any skill's agents/ dir.
+        ["host.toml", path.join(root, "secret.txt")],
       ]) {
         await fs.symlink(source, path.join(home, "agents", name));
       }

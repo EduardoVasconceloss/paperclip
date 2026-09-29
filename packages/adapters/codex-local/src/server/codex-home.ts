@@ -470,7 +470,7 @@ async function stageContainedSubtree(
 async function stageDirectorySecure(
   sourceDir: string,
   targetDir: string,
-  containTopLevelLinks = false,
+  roleRoots?: string[],
 ): Promise<void> {
   await fs.mkdir(targetDir, { recursive: true, mode: 0o700 });
   const realSourceDir = await fs.realpath(sourceDir);
@@ -489,13 +489,10 @@ async function stageDirectorySecure(
     // of it (`back -> .` / `back -> ..`) is degenerate: using it as a root would
     // re-stage the whole home under `skills/`. Skip it.
     if (isResolvedPathInside(realSourceDir, resolved)) continue;
-    // `agents/` children link to `<skill>/agents/<role>.toml`: the role must stay inside
-    // that skill, so a role file (or `agents/` dir) linked out of it cannot ship host files.
-    if (containTopLevelLinks && entry.isSymbolicLink()) {
-      const linkTarget = path.resolve(sourceDir, await fs.readlink(entrySource));
-      const skillRoot = await fs.realpath(path.dirname(path.dirname(linkTarget))).catch(() => null);
-      if (!skillRoot || !isResolvedPathInside(resolved, skillRoot)) continue;
-    }
+    // `agents/` children link to `<skill>/agents/<role>.toml`: a link must land inside the
+    // `agents/` of a skill staged under `skills/`, so a role file (or `agents/` dir) linked out
+    // of it, or a link straight at a host file, cannot ship host files.
+    if (roleRoots && entry.isSymbolicLink() && !roleRoots.some((root) => isResolvedPathInside(resolved, root))) continue;
     const entryStat = await fs.stat(resolved).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
       throw error;
@@ -512,6 +509,16 @@ async function stageDirectorySecure(
     }
     // Other types (sockets, devices) are silently skipped.
   }
+}
+
+/** The `agents/` dir of each skill linked under `<home>/skills`, by real skill path (the dir itself may be a link). */
+async function skillRoleRoots(home: string): Promise<string[]> {
+  const skillsDir = path.join(home, "skills");
+  const names = await fs.readdir(skillsDir).catch(() => [] as string[]);
+  const roots = await Promise.all(
+    names.map((name) => fs.realpath(path.join(skillsDir, name)).then((root) => path.join(root, "agents"), () => null)),
+  );
+  return roots.filter((root): root is string => root !== null);
 }
 
 /**
@@ -538,7 +545,7 @@ async function stageCodexHomeEntry(
   if (stat.isDirectory()) {
     // Recursively copy with mode normalization — nested regular files land
     // `0600` and dangling/circular symlinks are skipped.
-    await stageDirectorySecure(source, target, entry === "agents");
+    await stageDirectorySecure(source, target, entry === "agents" ? await skillRoleRoots(sourceHome) : undefined);
     return;
   }
 

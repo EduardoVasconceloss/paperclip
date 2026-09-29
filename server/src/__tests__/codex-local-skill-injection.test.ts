@@ -293,6 +293,52 @@ describe("codex local adapter skill injection", () => {
       });
     });
 
+    describe("role name collisions in the shared home", () => {
+      async function twoRepoSkillsShipping(root: string, roleName: string) {
+        const repo = path.join(root, "repo");
+        const entries = [];
+        for (const skillName of ["design", "audit"]) {
+          await createPaperclipRepoSkill(repo, skillName);
+          const source = path.join(repo, "skills", skillName);
+          await fs.mkdir(path.join(source, "agents"), { recursive: true });
+          await fs.writeFile(path.join(source, "agents", `${roleName}.toml`), `name = "${skillName}"\n`, "utf8");
+          entries.push({ key: `paperclip/${skillName}`, runtimeName: skillName, source });
+        }
+        return entries as [(typeof entries)[number], (typeof entries)[number]];
+      }
+
+      it("repoints a live role link of another Paperclip skill when this run wants the role from a different skill", async () => {
+        const { root, codexHome, skillsHome, logs, onLog } = await setup();
+        const [design, audit] = await twoRepoSkillsShipping(root, "reviewer");
+        const skillsEntries = [design, audit];
+
+        await ensureCodexSkillsInjected(onLog, { skillsHome, skillsEntries, desiredSkillNames: [design.key] });
+        await ensureCodexSkillsInjected(onLog, { skillsHome, skillsEntries, desiredSkillNames: [audit.key] });
+
+        expect(await fs.readlink(path.join(codexHome, "agents", "reviewer.toml"))).toBe(
+          path.join(audit.source, "agents", "reviewer.toml"),
+        );
+        expect(logs).toContainEqual({
+          stream: "stdout",
+          chunk: expect.stringContaining('Repaired Codex agent role "reviewer.toml"'),
+        });
+      });
+
+      it("keeps an operator's live link that shadows a role name", async () => {
+        const { root, codexHome, skillsHome, onLog } = await setup();
+        const [design] = await twoRepoSkillsShipping(root, "reviewer");
+        const operatorRole = path.join(root, "operator", "reviewer.toml");
+        await fs.mkdir(path.dirname(operatorRole), { recursive: true });
+        await fs.writeFile(operatorRole, 'name = "operator"\n', "utf8");
+        await fs.mkdir(path.join(codexHome, "agents"), { recursive: true });
+        await fs.symlink(operatorRole, path.join(codexHome, "agents", "reviewer.toml"));
+
+        await ensureCodexSkillsInjected(onLog, { skillsHome, skillsEntries: [design], desiredSkillNames: [design.key] });
+
+        expect(await fs.readlink(path.join(codexHome, "agents", "reviewer.toml"))).toBe(operatorRole);
+      });
+    });
+
     it("prunes a dangling role link left by a removed Paperclip repo skill", async () => {
       const { root, codexHome, skillsHome, logs, onLog } = await setup();
       const repo = path.join(root, "repo");

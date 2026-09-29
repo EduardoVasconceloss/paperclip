@@ -266,6 +266,14 @@ async function pruneBrokenUnavailablePaperclipSkillSymlinks(
   }
 }
 
+async function isPaperclipSkillRolePath(rolePath: string): Promise<boolean> {
+  const skillDir = path.dirname(path.dirname(rolePath));
+  return (
+    path.basename(path.dirname(rolePath)) === "agents" &&
+    (await isLikelyPaperclipRuntimeSkillPath(skillDir, path.basename(skillDir), { requireSkillMarkdown: false }))
+  );
+}
+
 // Codex loads agent roles only from CODEX_HOME/agents, not from a skill's own agents/ folder, so
 // link the roles that desired skills ship. As with skills, live links are never removed (other
 // agents and the operator share this home); only dangling links into Paperclip repo skills are.
@@ -309,14 +317,7 @@ async function syncCodexSkillAgentRoles(
     const linkedPath = await fs.readlink(target).catch(() => null);
     if (!linkedPath) continue;
     const resolvedLinkedPath = path.resolve(agentsHome, linkedPath);
-    if (await pathExists(resolvedLinkedPath)) continue;
-    const skillDir = path.dirname(path.dirname(resolvedLinkedPath));
-    if (
-      path.basename(path.dirname(resolvedLinkedPath)) !== "agents" ||
-      !(await isLikelyPaperclipRuntimeSkillPath(skillDir, path.basename(skillDir), { requireSkillMarkdown: false }))
-    ) {
-      continue;
-    }
+    if ((await pathExists(resolvedLinkedPath)) || !(await isPaperclipSkillRolePath(resolvedLinkedPath))) continue;
     await fs.unlink(target).catch(() => {});
     await onLog("stdout", `[paperclip] Removed stale Codex agent role "${name}" from ${agentsHome}\n`);
   }
@@ -324,7 +325,18 @@ async function syncCodexSkillAgentRoles(
   for (const [name, source] of wanted) {
     try {
       await fs.mkdir(agentsHome, { recursive: true });
-      if ((await ensurePaperclipSkillSymlink(source, path.join(agentsHome, name))) === "created") {
+      const target = path.join(agentsHome, name);
+      // A live link to the same-named role of another Paperclip skill would shadow this one, as for
+      // skills: repoint it. Links that are not Paperclip skill roles (the operator's) stay.
+      const linkedPath = await fs.readlink(target).catch(() => null);
+      const resolvedLinkedPath = linkedPath && path.resolve(agentsHome, linkedPath);
+      if (resolvedLinkedPath && resolvedLinkedPath !== source && (await isPaperclipSkillRolePath(resolvedLinkedPath))) {
+        await fs.unlink(target);
+        await fs.symlink(source, target);
+        await onLog("stdout", `[paperclip] Repaired Codex agent role "${name}" into ${agentsHome}\n`);
+        continue;
+      }
+      if ((await ensurePaperclipSkillSymlink(source, target)) === "created") {
         await onLog("stdout", `[paperclip] Linked Codex agent role "${name}" into ${agentsHome}\n`);
       }
     } catch (err) {
