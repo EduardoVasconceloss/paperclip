@@ -1177,6 +1177,38 @@ describe("stageCodexHomeForSync", () => {
     }
   });
 
+  it("stages an agent role that a skill links to another place inside itself", async () => {
+    const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-stage-roles-inside-"));
+    let staged: string | null = null;
+    try {
+      const home = path.join(root, "codex-home");
+      const design = path.join(root, "store", "design");
+      const audit = path.join(root, "store", "audit");
+      // design: a role file linked to another file inside the skill.
+      await fs.mkdir(path.join(design, "agents"), { recursive: true });
+      await fs.mkdir(path.join(design, "shared"), { recursive: true });
+      await fs.writeFile(path.join(design, "shared", "reviewer.toml"), 'name = "reviewer"\n', "utf8");
+      await fs.symlink(path.join(design, "shared", "reviewer.toml"), path.join(design, "agents", "reviewer.toml"));
+      // audit: the agents/ dir itself linked to another dir inside the skill.
+      await fs.mkdir(path.join(audit, "roles"), { recursive: true });
+      await fs.writeFile(path.join(audit, "roles", "auditor.toml"), 'name = "auditor"\n', "utf8");
+      await fs.symlink(path.join(audit, "roles"), path.join(audit, "agents"));
+      await fs.mkdir(path.join(home, "agents"), { recursive: true });
+      await fs.mkdir(path.join(home, "skills"), { recursive: true });
+      await fs.symlink(design, path.join(home, "skills", "design"));
+      await fs.symlink(audit, path.join(home, "skills", "audit"));
+      await fs.symlink(path.join(design, "agents", "reviewer.toml"), path.join(home, "agents", "reviewer.toml"));
+      await fs.symlink(path.join(audit, "agents", "auditor.toml"), path.join(home, "agents", "auditor.toml"));
+
+      staged = await stageCodexHomeForSync(home, { runId: "run-roles-inside" });
+
+      expect((await fs.readdir(path.join(staged, "agents"))).sort()).toEqual(["auditor.toml", "reviewer.toml"]);
+    } finally {
+      if (staged) await fs.rm(staged, { recursive: true, force: true });
+      await fs.rm(root, { recursive: true, force: true });
+    }
+  });
+
   // C1 — staged credential file must be mode 0600 (not the world-readable default).
   it("writes the staged auth.json with mode 0600", async () => {
     const root = await fs.mkdtemp(path.join(os.tmpdir(), "paperclip-codex-stage-mode-"));

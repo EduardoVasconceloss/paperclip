@@ -489,9 +489,9 @@ async function stageDirectorySecure(
     // of it (`back -> .` / `back -> ..`) is degenerate: using it as a root would
     // re-stage the whole home under `skills/`. Skip it.
     if (isResolvedPathInside(realSourceDir, resolved)) continue;
-    // `agents/` children link to `<skill>/agents/<role>.toml`: a link must land inside the
-    // `agents/` of a skill staged under `skills/`, so a role file (or `agents/` dir) linked out
-    // of it, or a link straight at a host file, cannot ship host files.
+    // `agents/` children link to `<skill>/agents/<role>.toml`: a link must land inside a skill
+    // staged under `skills/` (the rule role injection applies), so a role linked out of its skill,
+    // or straight at a host file, cannot ship host files.
     if (roleRoots && entry.isSymbolicLink() && !roleRoots.some((root) => isResolvedPathInside(resolved, root))) continue;
     const entryStat = await fs.stat(resolved).catch((error) => {
       if ((error as NodeJS.ErrnoException).code === "ENOENT") return null;
@@ -511,12 +511,12 @@ async function stageDirectorySecure(
   }
 }
 
-/** The `agents/` dir of each skill linked under `<home>/skills`, by real skill path (the dir itself may be a link). */
+/** The real path of each skill linked under `<home>/skills`. */
 async function skillRoleRoots(home: string): Promise<string[]> {
   const skillsDir = path.join(home, "skills");
   const names = await fs.readdir(skillsDir).catch(() => [] as string[]);
   const roots = await Promise.all(
-    names.map((name) => fs.realpath(path.join(skillsDir, name)).then((root) => path.join(root, "agents"), () => null)),
+    names.map((name) => fs.realpath(path.join(skillsDir, name)).catch(() => null)),
   );
   return roots.filter((root): root is string => root !== null);
 }
